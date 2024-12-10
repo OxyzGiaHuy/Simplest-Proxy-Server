@@ -1,0 +1,196 @@
+#include <iostream>
+#include <string>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+#pragma comment(lib, "ws2_32.lib")
+
+#define PORT 8080
+#define BUFFER_SIZE 8192
+
+void initialize_openssl() {
+    SSL_library_init();
+    SSL_load_error_strings();
+    OpenSSL_add_all_algorithms();
+}
+
+SSL_CTX* create_context() {
+    const SSL_METHOD* method = SSLv23_server_method();
+    SSL_CTX* ctx = SSL_CTX_new(method);
+    if (!ctx) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+    return ctx;
+}
+
+void configure_context(SSL_CTX* ctx) {
+    // Load certificate and private key
+    if (SSL_CTX_use_certificate_file(ctx, "cert.pem", SSL_FILETYPE_PEM) <= 0 ||
+        SSL_CTX_use_PrivateKey_file(ctx, "key.pem", SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+}
+
+void handle_https_client(SOCKET clientSocket, SSL_CTX* ctx) {
+    char buffer[BUFFER_SIZE];
+
+    // Create SSL object and attach it to the client socket
+    SSL* ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, clientSocket);
+
+    // Perform SSL/TLS handshake with the client
+    if (SSL_accept(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl);
+        closesocket(clientSocket);
+        return;
+    }
+
+    // Receive the initial HTTP CONNECT request
+    int bytesReceived = SSL_read(ssl, buffer, BUFFER_SIZE);
+    if (bytesReceived <= 0) {
+        std::cerr << "Failed to read CONNECT request from client.\n";
+        SSL_free(ssl);
+        closesocket(clientSocket);
+        return;
+    }
+    buffer[bytesReceived] = '\0';
+
+    // Extract the hostname and port from the CONNECT request
+    std::string connectRequest(buffer);
+    size_t hostPos = connectRequest.find(" ");
+    size_t portPos = connectRequest.find(":");
+    size_t endPos = connectRequest.find(" ", hostPos + 1);
+    std::string hostname = connectRequest.substr(hostPos + 1, portPos - hostPos - 1);
+    std::string port = connectRequest.substr(portPos + 1, endPos - portPos - 1);
+
+    std::cout << "CONNECT request for: " << hostname << ":" << port << "\n";
+
+    // Connect to the target server
+    SOCKET targetSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (targetSocket == INVALID_SOCKET) {
+        std::cerr << "Failed to create socket for target server.\n";
+        SSL_free(ssl);
+        closesocket(clientSocket);
+        return;
+    }
+
+    sockaddr_in targetAddr;
+    targetAddr.sin_family = AF_INET;
+    targetAddr.sin_port = htons(std::stoi(port));
+
+    struct hostent* host = gethostbyname(hostname.c_str());
+    if (!host) {
+        std::cerr << "Failed to resolve hostname: " << hostname << "\n";
+        closesocket(targetSocket);
+        SSL_free(ssl);
+        closesocket(clientSocket);
+        return;
+    }
+
+    memcpy(&targetAddr.sin_addr, host->h_addr, host->h_length);
+
+    if (connect(targetSocket, (struct sockaddr*)&targetAddr, sizeof(targetAddr)) == SOCKET_ERROR) {
+        std::cerr << "Failed to connect to target server.\n";
+        closesocket(targetSocket);
+        SSL_free(ssl);
+        closesocket(clientSocket);
+        return;
+    }
+
+    // Send a 200 Connection Established response to the client
+    const char* response = "HTTP/1.1 200 Connection Established\r\n\r\n";
+    SSL_write(ssl, response, strlen(response));
+
+    // Forward data between client and server
+    fd_set readfds;
+    int max_fd = (clientSocket > targetSocket ? clientSocket : targetSocket) + 1;
+
+    while (true) {
+        FD_ZERO(&readfds);
+        FD_SET(clientSocket, &readfds);
+        FD_SET(targetSocket, &readfds);
+
+        if (select(max_fd, &readfds, nullptr, nullptr, nullptr) < 0) {
+            break;
+        }
+
+        if (FD_ISSET(clientSocket, &readfds)) {
+            bytesReceived = SSL_read(ssl, buffer, BUFFER_SIZE);
+            if (bytesReceived <= 0) break;
+            send(targetSocket, buffer, bytesReceived, 0);
+        }
+
+        if (FD_ISSET(targetSocket, &readfds)) {
+            bytesReceived = recv(targetSocket, buffer, BUFFER_SIZE, 0);
+            if (bytesReceived <= 0) break;
+            SSL_write(ssl, buffer, bytesReceived);
+        }
+    }
+
+    closesocket(targetSocket);
+    SSL_free(ssl);
+    closesocket(clientSocket);
+}
+
+int main() {
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << "Failed to initialize Winsock.\n";
+        return 1;
+    }
+
+    initialize_openssl();
+    SSL_CTX* ctx = create_context();
+    configure_context(ctx);
+
+    SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (serverSocket == INVALID_SOCKET) {
+        std::cerr << "Failed to create server socket.\n";
+        WSACleanup();
+        SSL_CTX_free(ctx);
+        return 1;
+    }
+
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_port = htons(PORT);
+
+    if (bind(serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+        std::cerr << "Bind failed.\n";
+        closesocket(serverSocket);
+        WSACleanup();
+        SSL_CTX_free(ctx);
+        return 1;
+    }
+
+    if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR) {
+        std::cerr << "Listen failed.\n";
+        closesocket(serverSocket);
+        WSACleanup();
+        SSL_CTX_free(ctx);
+        return 1;
+    }
+
+    std::cout << "HTTPS Proxy server is running on port " << PORT << "...\n";
+
+    while (true) {
+        SOCKET clientSocket = accept(serverSocket, nullptr, nullptr);
+        if (clientSocket == INVALID_SOCKET) {
+            std::cerr << "Failed to accept connection.\n";
+            continue;
+        }
+
+        handle_https_client(clientSocket, ctx);
+    }
+
+    closesocket(serverSocket);
+    SSL_CTX_free(ctx);
+    WSACleanup();
+    return 0;
+}
