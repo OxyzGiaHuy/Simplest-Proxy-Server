@@ -55,7 +55,10 @@ void logMessage(const std::string &message)
     {
         combined_logs += entry + "\r\n";
     }
+    int textLen = GetWindowTextLength(hWndEdit);
     SetWindowTextA(hWndEdit, combined_logs.c_str());
+    SendMessage(hWndEdit, EM_SETSEL, textLen, textLen);
+    SendMessage(hWndEdit, EM_SCROLLCARET, 0, 0);
 }
 
 void addToHostRunning(const std::string &hostname)
