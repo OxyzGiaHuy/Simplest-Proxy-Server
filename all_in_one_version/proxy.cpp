@@ -2,10 +2,33 @@
 #include <winsock2.h>
 #include <thread>
 #include <ws2tcpip.h>
+#include <unordered_set>
+#include <mutex>
+#include <string>
 
 #pragma comment(lib, "ws2_32.lib")
 #define PORT 8888
 #define BUFFER_SIZE 4096
+
+std::unordered_set<std::string> blacklist;
+std::mutex blacklist_mutex; 
+
+void addToBlacklist(const std::string& hostname) {
+    std::lock_guard<std::mutex> lock(blacklist_mutex);
+    blacklist.insert(hostname);
+    std::cout << "Added to blacklist: " << hostname << std::endl;
+}
+
+void removeFromBlacklist(const std::string& hostname) {
+    std::lock_guard<std::mutex> lock(blacklist_mutex);
+    blacklist.erase(hostname);
+    std::cout << "Removed from blacklist: " << hostname << std::endl;
+}
+
+bool isBlacklisted(const std::string& hostname) {
+    std::lock_guard<std::mutex> lock(blacklist_mutex);
+    return blacklist.count(hostname) > 0;
+}
 
 void resolve_hostname(const char* hostname, struct sockaddr_in& server) {
     struct addrinfo hints = {0}, *res = NULL;
@@ -49,6 +72,13 @@ void handle_client(SOCKET client_socket) {
         
         sscanf(buffer, "CONNECT %255[^:]:%d", hostname, &port);
         std::cout << "CONNECT request to " << hostname << ":" << port << std::endl;
+
+        if (isBlacklisted(hostname)) {
+            std::cout << "Request blocked for blacklisted host: " << hostname << std::endl;
+            send(client_socket, "HTTP/1.1 403 Forbidden\r\n\r\n", 26, 0);
+            closesocket(client_socket);
+            return;
+        }
 
         // Establish connection to the target server
         struct sockaddr_in target_addr{0};
@@ -112,6 +142,13 @@ void handle_client(SOCKET client_socket) {
         char hostname[256] = {0};
         sscanf(url, "http://%255[^/]", hostname);
 
+        if (isBlacklisted(hostname)) {
+            std::cout << "Request blocked for blacklisted host: " << hostname << std::endl;
+            send(client_socket, "HTTP/1.1 403 Forbidden\r\n\r\n", 26, 0);
+            closesocket(client_socket);
+            return;
+        }
+
         struct sockaddr_in target_addr = {0};
         target_addr.sin_family = AF_INET;
         target_addr.sin_port = htons(80);
@@ -134,7 +171,6 @@ void handle_client(SOCKET client_socket) {
 
         closesocket(target_socket);
     }
-
     closesocket(client_socket);
 }
 
@@ -179,20 +215,40 @@ int main() {
     // Listen for incoming connections
     listen(server_socket, 3);
     std::cout << "Waiting for incoming connections...\n";
+    std::thread server_thread([&]() { // Lambda for server thread
+        // Accept and handle client connections
+        c = sizeof(struct sockaddr_in);
+        while ((client_socket = accept(server_socket, (struct sockaddr*)&client, &c)) != INVALID_SOCKET) {
+            std::cout << "Connection accepted.\n";
+            std::thread client_thread(handle_client, client_socket);
+            client_thread.detach(); // Handle the client in a separate thread
+        }
 
-    // Accept and handle client connections
-    c = sizeof(struct sockaddr_in);
-    while ((client_socket = accept(server_socket, (struct sockaddr*)&client, &c)) != INVALID_SOCKET) {
-        std::cout << "Connection accepted.\n";
-        std::thread client_thread(handle_client, client_socket);
-        client_thread.detach(); // Handle the client in a separate thread
-    }
+        if (client_socket == INVALID_SOCKET) {
+            std::cerr << "Accept failed. Error Code: " << WSAGetLastError() << std::endl;
+        }
 
-    if (client_socket == INVALID_SOCKET) {
-        std::cerr << "Accept failed. Error Code: " << WSAGetLastError() << std::endl;
-    }
+        closesocket(server_socket);
+        WSACleanup();
+    });
+    server_thread.detach();
+    std::string command;
+    do {
+        std::cout << "Enter command (add <hostname>, remove <hostname>, exit): ";
+        std::cin >> command;
 
-    closesocket(server_socket);
-    WSACleanup();
+        if (command == "add") {
+            std::string hostname;
+            std::cin >> hostname;
+            addToBlacklist(hostname);
+        } else if (command == "remove") {
+            std::string hostname;
+            std::cin >> hostname;
+            removeFromBlacklist(hostname);
+        }
+        else if (command != "exit") {
+            std::cout << "Invalid command." << std::endl;
+        }
+    } while (command != "exit");
     return 0;
 }
