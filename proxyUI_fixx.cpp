@@ -14,6 +14,7 @@
 #include <sstream>
 #include <regex>
 #include <winuser.h>
+#include <ctime>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -49,7 +50,7 @@ void logMessage(const std::string& message) {
     std::tm* localTime = std::localtime(&now);
 
     // Định dạng thời gian thành hh:mm:ss
-    char timeBuffer[18]; // Đủ để chứa "hh:mm:ss"
+    char timeBuffer[20]; // Đủ để chứa "hh:mm:ss"
     std::strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S %d/%m/%Y", localTime);
 
     // Tạo chuỗi log với thời gian
@@ -464,7 +465,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         // Create controls
         // Log window (hWndEdit)
-        hWndEdit = CreateWindowA("EDIT", "Log", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER, 10, 10, 780, 200, hWnd, NULL, NULL, NULL);
+        hWndEdit = CreateWindowA("EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER, 10, 10, 780, 200, hWnd, NULL, NULL, NULL);
 
         // Blacklist window (hWndList)
         hWndList = CreateWindowA("LISTBOX", "Blacklist", WS_CHILD | WS_VISIBLE | LBS_NOTIFY | WS_BORDER | WS_CAPTION, 10, 220, 360, 200, hWnd, (HMENU)3, NULL, NULL);
