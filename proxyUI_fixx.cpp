@@ -14,7 +14,8 @@
 #include <sstream>
 #include <regex>
 #include <winuser.h>
-#include <ctime>
+#include<ctime>
+#include<fstream>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -44,13 +45,47 @@ std::mutex log_mutex;
 std::set<std::string> active_hosts;
 std::mutex active_hosts_mutex;
 
+std::string getLogFileName() {
+    // Lấy ngày hiện tại
+    std::time_t now = std::time(nullptr);
+    std::tm* localTime = std::localtime(&now);
+    char buffer[20];
+    std::strftime(buffer, sizeof(buffer), "log-%d-%m-%Y.txt", localTime);
+
+    return std::string(buffer);
+}
+
+// Hàm ghi log vào file
+void logMessageToFile(const std::string& message) {
+    // Lấy tên file log
+    std::string logFileName = getLogFileName();
+
+    // Mở file ở chế độ append
+    std::fstream logFile(logFileName, std::ios::app);
+    if (!logFile.is_open()) {
+        std::cerr << "Failed to open the log file: " << logFileName << "\n";
+        return;
+    }
+
+    // Lấy thời gian hiện tại để thêm vào log
+    std::time_t now = std::time(nullptr);
+    std::tm* localTime = std::localtime(&now);
+
+    // Định dạng thời gian log
+    char timeBuffer[20];
+    std::strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S", localTime);
+
+    // Ghi log vào file
+    logFile << "[" << timeBuffer << "] " << message << "\n";
+    logFile.close();
+}
+
 void logMessage(const std::string& message) {
     // Lấy thời gian hiện tại
     std::time_t now = std::time(nullptr);
     std::tm* localTime = std::localtime(&now);
 
-    // Định dạng thời gian thành hh:mm:ss
-    char timeBuffer[20]; // Đủ để chứa "hh:mm:ss"
+    char timeBuffer[20]; 
     std::strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S %d/%m/%Y", localTime);
 
     // Tạo chuỗi log với thời gian
@@ -155,6 +190,7 @@ bool resolve_hostname(const char *hostname, struct sockaddr_in &server)
         std::string s(hostname);
         std:: string t(ip_str);
         logMessage(s + " --> " + t + "\n");
+        logMessageToFile(s + " --> " + t + "\n");
         freeaddrinfo(res);
         return true;
     }
@@ -162,6 +198,7 @@ bool resolve_hostname(const char *hostname, struct sockaddr_in &server)
     {
         std::string s(hostname);
         logMessage("Failed to resolve hostname: " + s + "\n");
+        logMessageToFile("Failed to resolve hostname: " + s + "\n");
         return false;
     }
 }
@@ -191,6 +228,7 @@ void add_to_blacklist(const std::string &url)
     std::regex url_regex(R"(^(?:(https?):\/\/)?([^:\/]+)(?::(\d+))?$)");
     std::smatch url_match;
 
+    
     if (std::regex_match(url, url_match, url_regex))
     {
         // Protocol (optional).
