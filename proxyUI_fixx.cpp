@@ -14,8 +14,8 @@
 #include <sstream>
 #include <regex>
 #include <winuser.h>
-#include<ctime>
-#include<fstream>
+#include <ctime>
+#include <fstream>
 
 #pragma comment(lib, "ws2_32.lib")
 
