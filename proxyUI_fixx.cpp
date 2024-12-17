@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <array>
 #include <deque>
+#include <queue>
 #include <set>
 #include <algorithm>
 #include <sstream>
@@ -23,6 +24,7 @@
 #define DEFAULT_PORT "8888"
 #define BUFFER_SIZE 4096
 
+
 // Structure to store blacklist information
 struct BlacklistEntry
 {
@@ -36,9 +38,10 @@ std::mutex blacklist_mutex;
 SOCKET serverSocket = INVALID_SOCKET;
 HWND hWndEdit, hWndList, hWndStart, hWndStop, hWndUrl, hwndHostRunning;
 HWND hWndUserGuide;
+std::queue<std::string> List;
 bool running = false;
 
-const int MAX_LOG_ENTRIES = 10000;
+const int MAX_LOG_ENTRIES = 100;
 std::deque<std::string> log_entries;
 std::mutex log_mutex;
 
@@ -74,7 +77,6 @@ void logMessageToFile(const std::string& message) {
     // Định dạng thời gian log
     char timeBuffer[20];
     std::strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S", localTime);
-
     {
     std::lock_guard<std::mutex> lock(log_mutex);
     logFile << "[" << timeBuffer << "] " << message << "\n";
@@ -84,21 +86,35 @@ void logMessageToFile(const std::string& message) {
 }
 
 void logMessage(const std::string& message) {
-    // Lấy thời gian hiện tại
     std::time_t now = std::time(nullptr);
     std::tm* localTime = std::localtime(&now);
 
     char timeBuffer[20]; 
     std::strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S %d/%m/%Y", localTime);
+    std::string currentTime(timeBuffer);
+    std::string tmp;
+    tmp =  "[" + currentTime + "] " + message + "\r\n";
 
-    // Tạo chuỗi log với thời gian
-    std::ostringstream logStream;
-    logStream << "[" << timeBuffer << "] " << message << "\r\n";
+    List.push(tmp);
 
-    int length = GetWindowTextLength(hWndEdit);
+    if (List.size() > MAX_LOG_ENTRIES)
+    {
+        List.pop(); 
+    }
 
-    SendMessage(hWndEdit, EM_SETSEL, length, length);
-    SendMessage(hWndEdit, EM_REPLACESEL, 0, (LPARAM)logStream.str().c_str());
+    std::string logContent;
+    std::queue<std::string> tempQueue = List; 
+    while (!tempQueue.empty())
+    {
+        logContent += tempQueue.front();
+        tempQueue.pop();
+    }
+
+    SetWindowTextA(hWndEdit, logContent.c_str());
+
+    int textLength = GetWindowTextLengthA(hWndEdit);
+    SendMessageA(hWndEdit, EM_SETSEL, textLength, textLength);
+    SendMessageA(hWndEdit, WM_VSCROLL, SB_BOTTOM, 0);
 }
 
 void addToHostRunning(const std::string &hostname)
@@ -192,7 +208,7 @@ bool resolve_hostname(const char *hostname, struct sockaddr_in &server)
         char *ip_str = inet_ntoa(server.sin_addr);
         std::string s(hostname);
         std:: string t(ip_str);
-        logMessage(s + " --> " + t + "\n");
+        // logMessage(s + " --> " + t + "\n");
         logMessageToFile(s + " --> " + t + "\n");
         freeaddrinfo(res);
         return true;
@@ -225,7 +241,7 @@ void add_to_blacklist(const std::string &url)
     std::lock_guard<std::mutex> lock(blacklist_mutex);
 
     std::string hostname;
-    int port = 80; // Default port if no port is specified
+    int port = 443; // Default port if no port is specified
 
     // Regular expression to match protocol, hostname, and optional port.
     std::regex url_regex(R"(^(?:(https?):\/\/)?([^:\/]+)(?::(\d+))?$)");
@@ -234,11 +250,10 @@ void add_to_blacklist(const std::string &url)
     
     if (std::regex_match(url, url_match, url_regex))
     {
-        // Protocol (optional).
         std::string protocol = url_match[1].str();
-        if (protocol == "https")
+        if (protocol == "http")
         {
-            port = 443;
+            port = 80;
         }
 
         // Hostname (mandatory).
@@ -469,18 +484,6 @@ void handleClient(SOCKET clientSocket)
     }
 
     closesocket(clientSocket);
-}
-
-void forwardData(SOCKET from, SOCKET to)
-{
-    char buffer[BUFFER_SIZE];
-    int bytesReceived;
-    while ((bytesReceived = recv(from, buffer, BUFFER_SIZE, 0)) > 0)
-    {
-        send(to, buffer, bytesReceived, 0);
-    }
-    closesocket(from);
-    closesocket(to);
 }
 
 // Thread function to listen for client connections
@@ -732,7 +735,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Create window
     HWND hWnd = CreateWindowA(CLASS_NAME, "Proxy App", WS_OVERLAPPEDWINDOW,
-                              CW_USEDEFAULT, CW_USEDEFAULT, 900, 590, NULL, NULL, hInstance, NULL);
+                              CW_USEDEFAULT, CW_USEDEFAULT, 820, 630, NULL, NULL, hInstance, NULL);
     if (!hWnd)
     {
         MessageBoxA(NULL, "Failed to create window", "Error", MB_OK | MB_ICONERROR);
