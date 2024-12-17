@@ -41,7 +41,7 @@ HWND hWndUserGuide;
 std::queue<std::string> List;
 bool running = false;
 
-const int MAX_LOG_ENTRIES = 100;
+const int MAX_LOG_ENTRIES = 70;
 std::deque<std::string> log_entries;
 std::mutex log_mutex;
 
@@ -97,7 +97,7 @@ void logMessage(const std::string& message) {
 
     List.push(tmp);
 
-    if (List.size() > MAX_LOG_ENTRIES)
+    while (List.size() >= MAX_LOG_ENTRIES)
     {
         List.pop(); 
     }
@@ -114,7 +114,7 @@ void logMessage(const std::string& message) {
 
     int textLength = GetWindowTextLengthA(hWndEdit);
     SendMessageA(hWndEdit, EM_SETSEL, textLength, textLength);
-    SendMessageA(hWndEdit, WM_VSCROLL, SB_BOTTOM, 0);
+    SendMessageA(hWndEdit, EM_SCROLLCARET, 0, 0);
 }
 
 void addToHostRunning(const std::string &hostname)
@@ -314,7 +314,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         closesocket(client_socket);
         return;
     }
-    std::cout << "CONNECT request to " << hostname << ":" << port << std::endl;
+    // std::cout << "CONNECT request to " << hostname << ":" << port << std::endl;
 
     // Check blacklist
     if (is_blacklisted(hostname))
@@ -508,6 +508,7 @@ void listenForClients()
             break;
         }
         logMessage("Client connected: "+ s + "\r\n");
+        std::cout << "Client connected: " + s + "\n";
         // Create a new thread to handle the client
         std::thread clientThread(handleClient, clientSocket);
         clientThread.detach();
@@ -642,6 +643,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 EnableWindow(hWndStop, TRUE);
 
                 // Log the start event
+                std::cout << "Proxy server started.\n";
+                std::cout << "Proxy is running on port 8888\n";
                 logMessage("Proxy server started.\r\n");
 
                 // Create a thread to listen for clients
@@ -660,8 +663,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 // Enable/disable Start/Stop buttons
                 EnableWindow(hWndStart, TRUE);
                 EnableWindow(hWndStop, FALSE);
-
+                while (!List.empty())
+                {
+                    List.pop();
+                }
+                
                 // Log the stop event
+                std::cout << "Proxy server stopped.\n";
                 logMessage("Proxy server stopped.\r\n");
             }
             break;
