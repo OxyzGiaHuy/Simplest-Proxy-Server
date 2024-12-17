@@ -1,0 +1,3 @@
+﻿  client.cpp
+D:\NAM 2 - HK1\Mang may tinh\proxy\Project1\client.cpp(56,65): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+LINK : fatal error LNK1168: cannot open D:\NAM 2 - HK1\Mang may tinh\proxy\Project1\x64\Debug\Project1.exe for writing
