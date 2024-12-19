@@ -1,18 +1,11 @@
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
+#include "../include/config.h"
+#include "../include/utils.h"
+#include "../include/proxy.h"
+#include "../include/ui.h"
+
 #include <iostream>
-#include <string>
+#include <windows.h>
 #include <thread>
-#include "proxy_server.h"
-#include "blacklist.h"
-#include "logging.h"
-
-#pragma comment(lib, "ws2_32.lib")
-
-// Forward declarations of global variables
-HWND hWndList, hWndStart, hWndStop, hWndUrl, hwndHostRunning;
-HWND hWndUserGuide;
 
 // Windows event handling function
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -23,7 +16,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         // Create controls
         // Log window (hWndEdit)
-        hWndEdit = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER, 10, 10, 780, 200, hWnd, NULL, NULL, NULL);
+        CreateWindowA("STATIC", "Proxy Log:", WS_VISIBLE | WS_CHILD, 10, 10, 570, 20, hWnd, NULL, NULL, NULL);
+        hWndEdit = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER, 10, 40, 570, 175, hWnd, NULL, NULL, NULL);
+
+        // Client window
+        CreateWindowA("STATIC", "Client connecting:", WS_VISIBLE | WS_CHILD, 590, 10, 200, 20, hWnd, NULL, NULL, NULL);
+        hWndClient = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER, 590, 40, 200, 175, hWnd, NULL, NULL, NULL);
 
         // Blacklist window (hWndList)
         hWndList = CreateWindowA("LISTBOX", "Blacklist", WS_CHILD | WS_VISIBLE | LBS_NOTIFY | WS_BORDER | WS_CAPTION | WS_VSCROLL, 10, 220, 360, 200, hWnd, (HMENU)3, NULL, NULL);
@@ -61,8 +59,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                                       "User Guide:\r\n"
                                       "- To add a URL to the blacklist, enter it in the input box and click 'Add URL'.\r\n"
                                       "- To remove a URL, select it from the blacklist and click 'Remove'.\r\n"
-                                      "- Use 'Start' to activate the proxy and 'Stop' to deactivate it.\r\n"
-                                      "- Monitor logs in the 'Proxy Log' box.\r\n",
+                                      "- Use 'Start' to activate the proxy and 'Stop' to deactivate it.\r\n",
                                       WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_BORDER,
                                       10, 470, 780, 100, hWnd, NULL, NULL, NULL);
         break;
@@ -131,11 +128,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             EnableWindow(hWndStop, TRUE);
 
             // Log the start event
+            std::cout << "Proxy server started.\n";
+            std::cout << "Proxy is running on port 8888\n";
             logMessage("Proxy server started.\r\n");
 
             // Create a thread to listen for clients
             running = true;
-            std::thread listenThread(listenForClientConnections);
+            std::thread listenThread(listenForClients);
             listenThread.detach();
         }
         break;
@@ -149,8 +148,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             // Enable/disable Start/Stop buttons
             EnableWindow(hWndStart, TRUE);
             EnableWindow(hWndStop, FALSE);
+            while (!List.empty())
+            {
+                List.pop();
+            }
 
             // Log the stop event
+            std::cout << "Proxy server stopped.\n";
             logMessage("Proxy server stopped.\r\n");
         }
         break;
@@ -161,7 +165,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             // Thêm URL vào blacklist
             if (strlen(url) > 0)
             {
-                addToBlacklist(url);
+                add_to_blacklist(url);
                 SetWindowTextA(hWndUrl, "");
             }
         }
@@ -169,7 +173,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case 4: // Remove
         {
             int index = SendMessage(hWndList, LB_GETCURSEL, 0, 0);
-            removeBlacklistEntry(index);
+            removeBlacklistUrl(index);
         }
         break;
         }
@@ -184,7 +188,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             // Thêm URL vào blacklist
             if (strlen(url) > 0)
             {
-                addToBlacklist(url);
+                add_to_blacklist(url);
                 SetWindowTextA(hWndUrl, ""); // Clear the textbox after adding URL
             }
         }

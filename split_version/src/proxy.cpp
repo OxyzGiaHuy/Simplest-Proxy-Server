@@ -1,20 +1,22 @@
-#include "proxy_server.h"
-#include "blacklist.h"
-#include "logging.h"
-#include "utility.h"
+#include "../include/proxy.h"
+#include "../include/config.h"
+#include "../include/utils.h"
+
 #include <iostream>
+#include <string>
+#include <vector>
 #include <thread>
-#include <array>
-#include <set>
 #include <mutex>
+#include <condition_variable>
+#include <array>
+#include <queue>
+#include <set>
+#include <algorithm>
+#include <sstream>
+#include <regex>
+#include <winuser.h>
 
-SOCKET serverSocket = INVALID_SOCKET;
-bool running = false;
-extern HWND hwndHostRunning;
-std::set<std::string> active_hosts;
-std::mutex active_hosts_mutex;
-
-void addToActiveHosts(const std::string &hostname)
+void addToHostRunning(const std::string &hostname)
 {
     std::lock_guard<std::mutex> lock(active_hosts_mutex);
     if (active_hosts.find(hostname) == active_hosts.end())
@@ -24,7 +26,7 @@ void addToActiveHosts(const std::string &hostname)
     }
 }
 
-void removeFromActiveHosts(const std::string &hostname)
+void removeFromHostRunning(const std::string &hostname)
 {
     std::lock_guard<std::mutex> lock(active_hosts_mutex);
     active_hosts.erase(hostname);
@@ -45,8 +47,6 @@ void removeFromActiveHosts(const std::string &hostname)
 // Function to handle CONNECT requests
 void handleHttpsRequest(SOCKET client_socket, const std::string &request)
 {
-    // logMessage("Handling CONNECT request...");
-
     // Extract hostname and port from CONNECT request
     char hostname[256] = {0};
     int port = 0;
@@ -58,23 +58,23 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         closesocket(client_socket);
         return;
     }
-    std::cout << "CONNECT request to " << hostname << ":" << port << std::endl;
 
     // Check blacklist
-    if (isBlacklisted(hostname))
+    if (is_blacklisted(hostname))
     {
         std::string response = "HTTP/1.1 403 Forbidden\r\n\r\n";
         send(client_socket, response.c_str(), response.length(), 0);
         closesocket(client_socket);
         return;
     }
-    addToActiveHosts(hostname);
+    addToHostRunning(hostname);
 
     // Establish connection to the target server
     struct sockaddr_in target_addr{0};
     target_addr.sin_family = AF_INET;
     target_addr.sin_port = htons(port);
-    resolveHostname(hostname, target_addr);
+    resolve_hostname(hostname, target_addr);
+    std::string s(hostname);
 
     SOCKET target_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(target_socket, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0)
@@ -82,7 +82,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         std::cerr << "Failed to connect to target: " << hostname << ":" << port << " Error: " << WSAGetLastError() << std::endl;
         send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
         closesocket(client_socket);
-        removeFromActiveHosts(hostname);
+        removeFromHostRunning(hostname);
         return;
     }
 
@@ -93,9 +93,10 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     // Relay data between client and server (this will forward encrypted data for HTTPS)
     fd_set fdset;
     std::array<char, BUFFER_SIZE> relay_buffer;
-
+    logMessage("Connecting to " + s + "\n");
     while (true)
     {
+
         FD_ZERO(&fdset);
         FD_SET(client_socket, &fdset);
         FD_SET(target_socket, &fdset);
@@ -104,7 +105,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         if (activity <= 0)
             break;
 
-        if (isBlacklisted(hostname))
+        if (is_blacklisted(hostname))
             break;
         // Forward data from client to target
         if (FD_ISSET(client_socket, &fdset))
@@ -126,9 +127,10 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     }
 
     // Close connections
+    logMessage("Disconnect to " + s + "\n");
     closesocket(target_socket);
     closesocket(client_socket);
-    removeFromActiveHosts(hostname);
+    removeFromHostRunning(hostname);
     return;
 }
 
@@ -156,18 +158,18 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     }
 
     // Check blacklist
-    if (isBlacklisted(hostname))
+    if (is_blacklisted(hostname))
     {
         std::string response = "HTTP/1.1 403 Forbidden\r\n\r\n";
         send(client_socket, response.c_str(), response.length(), 0);
         closesocket(client_socket);
         return;
     }
-    addToActiveHosts(hostname);
+    addToHostRunning(hostname);
     struct sockaddr_in target_addr = {0};
     target_addr.sin_family = AF_INET;
     target_addr.sin_port = htons(port);
-    resolveHostname(hostname.c_str(), target_addr);
+    resolve_hostname(hostname.c_str(), target_addr);
 
     SOCKET target_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(target_socket, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0)
@@ -175,29 +177,32 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
         std::cerr << "Failed to connect to HTTP target: " << hostname << std::endl;
         send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
         closesocket(client_socket);
-        removeFromActiveHosts(hostname);
+        removeFromHostRunning(hostname);
         return;
     }
 
     send(target_socket, request.c_str(), request.length(), 0);
 
     // Relay response back to client
+    logMessage("Connecting to " + hostname + "\n");
     std::array<char, BUFFER_SIZE> buffer;
     int recv_size;
+
     while ((recv_size = recv(target_socket, buffer.data(), buffer.size(), 0)) > 0)
     {
-        if (isBlacklisted(hostname))
+        if (is_blacklisted(hostname))
             break;
         send(client_socket, buffer.data(), recv_size, 0);
     }
 
+    logMessage("Disconnect to " + hostname + "\n");
     closesocket(target_socket);
     closesocket(client_socket);
-    removeFromActiveHosts(hostname);
+    removeFromHostRunning(hostname);
 }
 
 // Function to handle client connections
-void handleClientConnection(SOCKET clientSocket)
+void handleClient(SOCKET clientSocket)
 {
     char buffer[BUFFER_SIZE];
     struct sockaddr_in clientAddr = {};
@@ -228,12 +233,13 @@ void handleClientConnection(SOCKET clientSocket)
     {
         handleHttpRequest(clientSocket, request);
     }
-
+    if (!Clients.empty())
+        Clients.erase(clientIP);
     closesocket(clientSocket);
 }
 
 // Thread function to listen for client connections
-void listenForClientConnections()
+void listenForClients()
 {
     SOCKET clientSocket;
     struct sockaddr_in clientAddr;
@@ -245,6 +251,19 @@ void listenForClientConnections()
         char clientIP[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN);
         std::string s(clientIP);
+        Clients.insert(s);
+        bool exist = 0;
+        for (auto client : CurrentClients)
+        {
+            if (s == client)
+            {
+                exist = 1;
+                break;
+            }
+        }
+        std::cout << Clients.size() << " " << CurrentClients.size() << "\n";
+        if (!exist)
+            CurrentClients.push_back(s);
         if (clientSocket == INVALID_SOCKET)
         {
             if (running)
@@ -253,36 +272,11 @@ void listenForClientConnections()
             }
             break;
         }
-        logMessage("Client connected: " + s + "\r\n");
-        // Create a new thread to handle the client
-        std::thread clientThread(handleClientConnection, clientSocket);
+        // logMessage("Client connected: "+ s + "\r\n");
+        // // std::cout << "Client connected: " + s + "\n";
+        // // Create a new thread to handle the client
+        std::thread clientThread(handleClient, clientSocket);
         clientThread.detach();
-    }
-}
-
-// Function to resolve hostname to IP address
-bool resolveHostname(const char *hostname, struct sockaddr_in &server)
-{
-    struct addrinfo hints = {0}, *res = NULL;
-    hints.ai_family = AF_INET; // IPv4
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(hostname, NULL, &hints, &res) == 0)
-    {
-        struct sockaddr_in *addr = (struct sockaddr_in *)res->ai_addr;
-        server.sin_addr = addr->sin_addr;
-        char *ip_str = inet_ntoa(server.sin_addr);
-        std::string s(hostname);
-        std::string t(ip_str);
-        // logMessage(s + " --> " + t + "\n");
-        logMessageToFile(s + " --> " + t + "\n");
-        freeaddrinfo(res);
-        return true;
-    }
-    else
-    {
-        std::string s(hostname);
-        logMessage("Failed to resolve hostname: " + s + "\n");
-        logMessageToFile("Failed to resolve hostname: " + s + "\n");
-        return false;
+        ClientBoxMessage();
     }
 }
