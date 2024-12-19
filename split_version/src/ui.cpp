@@ -7,6 +7,9 @@
 #include <windows.h>
 #include <thread>
 
+// Global variable to manage the listening thread
+std::thread *listenThreadPtr = nullptr;
+
 // Windows event handling function
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -134,8 +137,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             // Create a thread to listen for clients
             running = true;
-            std::thread listenThread(listenForClients);
-            listenThread.detach();
+            listenThreadPtr = new std::thread(listenForClients); // Use listenThreadPtr
         }
         break;
         case 2: // Stop
@@ -144,6 +146,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             running = false;
             closesocket(serverSocket);
             WSACleanup();
+
+            // Wait for the listening thread to finish
+            if (listenThreadPtr && listenThreadPtr->joinable())
+            {
+                listenThreadPtr->join();
+                delete listenThreadPtr;
+                listenThreadPtr = nullptr; // Reset
+            }
 
             // Enable/disable Start/Stop buttons
             EnableWindow(hWndStart, TRUE);
@@ -195,8 +205,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
     case WM_DESTROY:
+    {
+        // Stop the proxy server (if it's running)
+        if (running)
+        {
+            running = false;
+            closesocket(serverSocket);
+            WSACleanup();
+        }
+
+        if (listenThreadPtr && listenThreadPtr->joinable())
+        {
+            listenThreadPtr->join();
+            delete listenThreadPtr;
+            listenThreadPtr = nullptr; // Reset
+        }
+
         PostQuitMessage(0);
         break;
+    }
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }

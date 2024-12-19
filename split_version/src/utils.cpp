@@ -44,6 +44,8 @@ void logMessageToFile(const std::string &message)
 
 void logMessage(const std::string &message)
 {
+    if (!running)
+        return;
     std::time_t now = std::time(nullptr);
     std::tm *localTime = std::localtime(&now);
 
