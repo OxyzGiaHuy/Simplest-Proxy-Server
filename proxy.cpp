@@ -53,6 +53,8 @@ std::mutex active_hosts_mutex;
 
 static std::atomic<int> activeConnections(0);
 
+std::string st;
+
 
 
 std::string getLogFileName() {
@@ -86,7 +88,7 @@ void logMessageToFile(const std::string& message) {
     logFile.close();
 }
 
-void AddLogEntry(const std::string& time, const std::string& clientIP, const std::string& host, const std::string& method, const std::string& version) {
+void AddLogEntry(const std::string& time, const std::string& clientIP, const std::string& host, const std::string& method, const std::string& version, const std::string& status) {
     
     int rowCount = ListView_GetItemCount(hWndLogListView);
     if (rowCount > MAX_LOG_ENTRIES)
@@ -121,6 +123,12 @@ void AddLogEntry(const std::string& time, const std::string& clientIP, const std
     lvItem.iSubItem = 4;
     lvItem.pszText = const_cast<char*>(version.c_str());
     ListView_SetItem(hWndLogListView, &lvItem);
+
+    // Insert status
+    lvItem.iSubItem = 5;  // Cột Status
+    lvItem.pszText = const_cast<char*>(status.c_str());
+    ListView_SetItem(hWndLogListView, &lvItem);
+
 }
 std::string GetTime()
 {
@@ -338,6 +346,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         std::string response = "HTTP/1.1 403 Forbidden\r\n\r\n";
         send(client_socket, response.c_str(), response.length(), 0);
         closesocket(client_socket);
+        st = "Blocked";
         return;
     }
     addToHostRunning(hostname);
@@ -366,7 +375,6 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     // Relay data between client and server (this will forward encrypted data for HTTPS)
     fd_set fdset;
     std::array<char, BUFFER_SIZE> relay_buffer;
-    // logMessage("Connecting to "+ s + "\n");
     while (true)
     {
         
@@ -378,7 +386,11 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         if (activity <= 0)
             break;
 
-        if(is_blacklisted(hostname)) break;
+        if(is_blacklisted(hostname))
+        {
+            st = "Blocked";
+            break;
+        }
         // Forward data from client to target
         if (FD_ISSET(client_socket, &fdset))
         {
@@ -396,6 +408,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
                 break;
             send(client_socket, relay_buffer.data(), recv_size, 0);
         }
+        st = "Allowed";
     }
 
     // Close connections
@@ -425,6 +438,7 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     {
         std::cerr << "Could not find Host header\r\n";
         send(client_socket, "HTTP/1.1 400 Bad Request\r\n\r\n", 26, 0);
+        st = "Pending";
         closesocket(client_socket);
         return;
     }
@@ -435,6 +449,7 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
         std::string response = "HTTP/1.1 403 Forbidden\r\n\r\n";
         send(client_socket, response.c_str(), response.length(), 0);
         closesocket(client_socket);
+        st = "Blocked";
         return;
     }
     addToHostRunning(hostname);
@@ -463,7 +478,12 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
 
     while ((recv_size = recv(target_socket, buffer.data(), buffer.size(), 0)) > 0)
     {
-        if(is_blacklisted(hostname)) break;
+        if(is_blacklisted(hostname))
+        {
+            st = "Blocked";
+            break;
+        }
+        st = "Allowed";
         send(client_socket, buffer.data(), recv_size, 0);
     }
 
@@ -496,8 +516,7 @@ void handleClient(SOCKET clientSocket)
     std::string request(buffer);
     std::stringstream buf(request);
     buf >> method >> hostname >> version;
-    std::string time = GetTime();
-    AddLogEntry(time,clientIP,hostname,method,version);
+    
     // Log the request
     // logMessage(std::string("Request from client: " + s + "\r\n" + request + "\r\n"));
 
@@ -509,6 +528,8 @@ void handleClient(SOCKET clientSocket)
     {
         handleHttpRequest(clientSocket, request);
     }
+    std::string time = GetTime();
+    AddLogEntry(time,clientIP,hostname,method,version, st);
     if(!Clients.empty()) Clients.erase(clientIP);
     closesocket(clientSocket);
 }
@@ -604,6 +625,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         lvColumn.pszText = "Version";
         lvColumn.cx = 100;
         ListView_InsertColumn(hWndLogListView, 4, &lvColumn);
+
+        lvColumn.pszText = "Status";
+        lvColumn.cx = 100;
+        ListView_InsertColumn(hWndLogListView, 5, &lvColumn);
 
             // Client window
             CreateWindowA("STATIC", "Client connecting", WS_VISIBLE | WS_CHILD, 590, 10, 200, 20, hWnd, NULL, NULL, NULL);
