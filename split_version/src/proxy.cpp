@@ -77,11 +77,23 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     std::string s(hostname);
 
     SOCKET target_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (target_socket == INVALID_SOCKET)
+    {
+        std::cerr << "Failed to create target socket\n";
+        send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
+        closesocket(client_socket);
+        removeFromHostRunning(hostname);
+        return;
+    }
     if (connect(target_socket, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0)
     {
         std::cerr << "Failed to connect to target: " << hostname << ":" << port << " Error: " << WSAGetLastError() << std::endl;
         send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
         closesocket(client_socket);
+        if (target_socket != INVALID_SOCKET)
+        {
+            closesocket(target_socket);
+        }
         removeFromHostRunning(hostname);
         return;
     }
@@ -94,7 +106,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     fd_set fdset;
     std::array<char, BUFFER_SIZE> relay_buffer;
     logMessage("Connecting to " + s + "\n");
-    while (true)
+    while (running)
     {
 
         FD_ZERO(&fdset);
@@ -128,7 +140,11 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
 
     // Close connections
     logMessage("Disconnect to " + s + "\n");
-    closesocket(target_socket);
+    if (target_socket != INVALID_SOCKET)
+    {
+        closesocket(target_socket);
+    }
+
     closesocket(client_socket);
     removeFromHostRunning(hostname);
     return;
@@ -172,11 +188,23 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     resolve_hostname(hostname.c_str(), target_addr);
 
     SOCKET target_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (target_socket == INVALID_SOCKET)
+    {
+        std::cerr << "Failed to create target socket\n";
+        send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
+        closesocket(client_socket);
+        removeFromHostRunning(hostname);
+        return;
+    }
     if (connect(target_socket, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0)
     {
         std::cerr << "Failed to connect to HTTP target: " << hostname << std::endl;
         send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
         closesocket(client_socket);
+        if (target_socket != INVALID_SOCKET)
+        {
+            closesocket(target_socket);
+        }
         removeFromHostRunning(hostname);
         return;
     }
@@ -188,7 +216,7 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     std::array<char, BUFFER_SIZE> buffer;
     int recv_size;
 
-    while ((recv_size = recv(target_socket, buffer.data(), buffer.size(), 0)) > 0)
+    while (running && (recv_size = recv(target_socket, buffer.data(), buffer.size(), 0)) > 0)
     {
         if (is_blacklisted(hostname))
             break;
@@ -196,7 +224,10 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     }
 
     logMessage("Disconnect to " + hostname + "\n");
-    closesocket(target_socket);
+    if (target_socket != INVALID_SOCKET)
+    {
+        closesocket(target_socket);
+    }
     closesocket(client_socket);
     removeFromHostRunning(hostname);
 }
@@ -214,9 +245,12 @@ void handleClient(SOCKET clientSocket)
     inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN);
     std::string s(clientIP);
 
-    if (recvSize == SOCKET_ERROR)
+    if (recvSize == SOCKET_ERROR || !running)
     {
-        closesocket(clientSocket);
+        if (clientSocket != INVALID_SOCKET)
+        {
+            closesocket(clientSocket);
+        }
         return;
     }
     buffer[recvSize] = '\0';
@@ -233,9 +267,13 @@ void handleClient(SOCKET clientSocket)
     {
         handleHttpRequest(clientSocket, request);
     }
+
+    if (clientSocket != INVALID_SOCKET)
+    {
+        closesocket(clientSocket);
+    }
     if (!Clients.empty())
         Clients.erase(clientIP);
-    closesocket(clientSocket);
 }
 
 // Thread function to listen for client connections
@@ -248,6 +286,16 @@ void listenForClients()
     while (running)
     {
         clientSocket = accept(serverSocket, (struct sockaddr *)&clientAddr, &clientAddrLen);
+
+        if (!running)
+        {
+            if (clientSocket != INVALID_SOCKET)
+            {
+                closesocket(clientSocket);
+            }
+            break;
+        }
+
         char clientIP[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN);
         std::string s(clientIP);
@@ -270,7 +318,8 @@ void listenForClients()
             {
                 std::cerr << "accept failed: " << WSAGetLastError() << std::endl;
             }
-            break;
+
+            continue;
         }
         // logMessage("Client connected: "+ s + "\r\n");
         // // std::cout << "Client connected: " + s + "\n";
