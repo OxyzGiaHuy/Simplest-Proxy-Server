@@ -17,6 +17,7 @@
 #include <winuser.h>
 #include <ctime>
 #include <fstream>
+#include <atomic>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -25,31 +26,29 @@
 #define BUFFER_SIZE 4096
 
 
-// Structure to store blacklist information
-struct BlacklistEntry
-{
-    std::string hostname;
-    int port;
-};
-
 // Global variables
-std::vector<BlacklistEntry> blacklist;
+std::vector<std::string> blacklist;
 std::mutex blacklist_mutex;
 SOCKET serverSocket = INVALID_SOCKET;
-HWND hWndEdit, hWndList, hWndStart, hWndStop, hWndUrl, hwndHostRunning;
+HWND hWndEdit, hWndList, hWndStart, hWndStop, hWndUrl, hwndHostRunning, hWndClient;
 HWND hWndUserGuide;
 std::queue<std::string> List;
+std::set<std::string> Clients;
+std::vector<std::string> CurrentClients;
 bool running = false;
 
-const int MAX_LOG_ENTRIES = 70;
+const int MAX_LOG_ENTRIES = 30;
 std::deque<std::string> log_entries;
 std::mutex log_mutex;
 
 std::set<std::string> active_hosts;
 std::mutex active_hosts_mutex;
 
+static std::atomic<int> activeConnections(0);
+
+
+
 std::string getLogFileName() {
-    // Lấy ngày hiện tại
     std::time_t now = std::time(nullptr);
     std::tm* localTime = std::localtime(&now);
     char buffer[20];+
@@ -58,23 +57,18 @@ std::string getLogFileName() {
     return std::string(buffer);
 }
 
-// Hàm ghi log vào file
 void logMessageToFile(const std::string& message) {
-    // Lấy tên file log
     std::string logFileName = getLogFileName();
 
-    // Mở file ở chế độ append
     std::fstream logFile(logFileName, std::ios::app);
     if (!logFile.is_open()) {
-        std::cerr << "Failed to open the log file: " << logFileName << "\n";
+        std::cerr << "Failed to open the log f  ile: " << logFileName << "\n";
         return;
     }
 
-    // Lấy thời gian hiện tại để thêm vào log
     std::time_t now = std::time(nullptr);
     std::tm* localTime = std::localtime(&now);
 
-    // Định dạng thời gian log
     char timeBuffer[20];
     std::strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S", localTime);
     {
@@ -97,7 +91,7 @@ void logMessage(const std::string& message) {
 
     List.push(tmp);
 
-    while (List.size() >= MAX_LOG_ENTRIES)
+    while (List.size() > MAX_LOG_ENTRIES)
     {
         List.pop(); 
     }
@@ -115,6 +109,19 @@ void logMessage(const std::string& message) {
     int textLength = GetWindowTextLengthA(hWndEdit);
     SendMessageA(hWndEdit, EM_SETSEL, textLength, textLength);
     SendMessageA(hWndEdit, EM_SCROLLCARET, 0, 0);
+}
+
+void ClientBoxMessage()
+{
+    std::string content;
+    for(auto client:Clients)
+    {
+        content += client + "\r\n";
+    }
+    SetWindowTextA(hWndClient, content.c_str());
+    int textLength = GetWindowTextLengthA(hWndEdit);
+    SendMessageA(hWndClient, EM_SETSEL, textLength, textLength);
+    SendMessageA(hWndClient, EM_SCROLLCARET, 0, 0);
 }
 
 void addToHostRunning(const std::string &hostname)
@@ -167,7 +174,6 @@ bool parseHostHeader(const std::string &request, std::string &hostname, int &por
     }
 
     hostHeaderLower = request.substr(pos, endline - pos);
-    // Remove leading space
     size_t start = hostHeaderLower.find_first_not_of(' ');
     if (start != std::string::npos)
     {
@@ -228,7 +234,7 @@ bool is_blacklisted(const std::string &hostname)
     std::lock_guard<std::mutex> lock(blacklist_mutex); // Đảm bảo thread-safe
     for (const auto &blocked : blacklist)
     {
-        if (hostname.find(blocked.hostname) != std::string::npos)
+        if (hostname.find(blocked) != std::string::npos)
         {
             return true;
         }
@@ -244,44 +250,23 @@ void add_to_blacklist(const std::string &url)
     int port = 443; // Default port if no port is specified
 
     // Regular expression to match protocol, hostname, and optional port.
-    std::regex url_regex(R"(^(?:(https?):\/\/)?([^:\/]+)(?::(\d+))?$)");
+    std::regex url_regex(R"(^(?:(http|https):\/\/)?([^:\/]+)(?::(\d+))?(\/.*)?$)");
     std::smatch url_match;
 
     
     if (std::regex_match(url, url_match, url_regex))
     {
-        std::string protocol = url_match[1].str();
-        if (protocol == "http")
-        {
-            port = 80;
-        }
-
-        // Hostname (mandatory).
         hostname = url_match[2].str();
-        // Port (optional).
-        if (!url_match[3].str().empty())
-        {
-            try
-            {
-                port = std::stoi(url_match[3].str());
-            }
-            catch (const std::invalid_argument &e)
-            {
-                // Invalid port, use default
-                port = 80;
-            }
-        }
     }
     else
     {
-        // If the provided input doesn't match a URL format, consider it to be only host.
         hostname = url;
     }
 
     bool isDuplicate = false;
     for (const auto &blocked : blacklist)
     {
-        if (hostname == blocked.hostname && port == blocked.port)
+        if (hostname == blocked)
         {
             isDuplicate = true;
             break;
@@ -291,8 +276,7 @@ void add_to_blacklist(const std::string &url)
     // Avoid duplicates
     if (!isDuplicate)
     {
-        BlacklistEntry entry = {hostname, port};
-        blacklist.push_back(entry);
+        blacklist.push_back(hostname);
         std::string url_string = hostname;
         SendMessageA(hWndList, LB_ADDSTRING, 0, (LPARAM)url_string.c_str());
     }
@@ -301,8 +285,6 @@ void add_to_blacklist(const std::string &url)
 // Function to handle CONNECT requests
 void handleHttpsRequest(SOCKET client_socket, const std::string &request)
 {
-    // logMessage("Handling CONNECT request...");
-
     // Extract hostname and port from CONNECT request
     char hostname[256] = {0};
     int port = 0;
@@ -314,7 +296,6 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         closesocket(client_socket);
         return;
     }
-    // std::cout << "CONNECT request to " << hostname << ":" << port << std::endl;
 
     // Check blacklist
     if (is_blacklisted(hostname))
@@ -331,6 +312,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     target_addr.sin_family = AF_INET;
     target_addr.sin_port = htons(port);
     resolve_hostname(hostname, target_addr);
+    std::string s(hostname);
 
     SOCKET target_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(target_socket, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0)
@@ -349,9 +331,10 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     // Relay data between client and server (this will forward encrypted data for HTTPS)
     fd_set fdset;
     std::array<char, BUFFER_SIZE> relay_buffer;
-
+    logMessage("Connecting to "+ s + "\n");
     while (true)
     {
+        
         FD_ZERO(&fdset);
         FD_SET(client_socket, &fdset);
         FD_SET(target_socket, &fdset);
@@ -381,6 +364,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     }
 
     // Close connections
+    logMessage("Disconnect to " + s + "\n");
     closesocket(target_socket);
     closesocket(client_socket);
     removeFromHostRunning(hostname);
@@ -423,6 +407,7 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     target_addr.sin_family = AF_INET;
     target_addr.sin_port = htons(port);
     resolve_hostname(hostname.c_str(), target_addr);
+    
 
     SOCKET target_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(target_socket, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0)
@@ -437,14 +422,17 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     send(target_socket, request.c_str(), request.length(), 0);
 
     // Relay response back to client
+    logMessage("Connecting to "+ hostname + "\n");
     std::array<char, BUFFER_SIZE> buffer;
     int recv_size;
+
     while ((recv_size = recv(target_socket, buffer.data(), buffer.size(), 0)) > 0)
     {
         if(is_blacklisted(hostname)) break;
         send(client_socket, buffer.data(), recv_size, 0);
     }
 
+    logMessage("Disconnect to "+ hostname + "\n");
     closesocket(target_socket);
     closesocket(client_socket);
     removeFromHostRunning(hostname);
@@ -482,7 +470,7 @@ void handleClient(SOCKET clientSocket)
     {
         handleHttpRequest(clientSocket, request);
     }
-
+    if(!Clients.empty()) Clients.erase(clientIP);
     closesocket(clientSocket);
 }
 
@@ -499,6 +487,18 @@ void listenForClients()
         char clientIP[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN);
         std::string s(clientIP);
+        Clients.insert(s);
+        bool exist = 0;
+        for(auto client : CurrentClients)
+        {
+            if( s == client)
+            {
+                exist = 1;
+                break;
+            }
+        }
+        std::cout<< Clients.size() << " " << CurrentClients.size() << "\n";
+        if(!exist) CurrentClients.push_back(s);
         if (clientSocket == INVALID_SOCKET)
         {
             if (running)
@@ -507,15 +507,17 @@ void listenForClients()
             }
             break;
         }
-        logMessage("Client connected: "+ s + "\r\n");
-        std::cout << "Client connected: " + s + "\n";
-        // Create a new thread to handle the client
+        // logMessage("Client connected: "+ s + "\r\n");
+        // // std::cout << "Client connected: " + s + "\n";
+        // // Create a new thread to handle the client
         std::thread clientThread(handleClient, clientSocket);
         clientThread.detach();
+        ClientBoxMessage();
     }
 }
 
 // Function to remove a URL from the blacklist
+
 void removeBlacklistUrl(int index)
 {
     if (index >= 0 && index < blacklist.size())
@@ -535,7 +537,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             // Create controls
             // Log window (hWndEdit)
-            hWndEdit = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER, 10, 10, 780, 200, hWnd, NULL, NULL, NULL);
+            CreateWindowA("STATIC", "Proxy Log:", WS_VISIBLE | WS_CHILD, 10, 10, 570, 20, hWnd, NULL, NULL, NULL);
+            hWndEdit = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER, 10, 40, 570, 175, hWnd, NULL, NULL, NULL);
+
+            // Client window
+            CreateWindowA("STATIC", "Client connecting:", WS_VISIBLE | WS_CHILD, 590, 10, 200, 20, hWnd, NULL, NULL, NULL);
+            hWndClient = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER, 590, 40, 200, 175, hWnd, NULL, NULL, NULL);
 
             // Blacklist window (hWndList)
             hWndList = CreateWindowA("LISTBOX", "Blacklist", WS_CHILD | WS_VISIBLE | LBS_NOTIFY | WS_BORDER | WS_CAPTION | WS_VSCROLL, 10, 220, 360, 200, hWnd, (HMENU)3, NULL, NULL);
@@ -573,8 +580,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             "User Guide:\r\n"
             "- To add a URL to the blacklist, enter it in the input box and click 'Add URL'.\r\n"
             "- To remove a URL, select it from the blacklist and click 'Remove'.\r\n"
-            "- Use 'Start' to activate the proxy and 'Stop' to deactivate it.\r\n"
-            "- Monitor logs in the 'Proxy Log' box.\r\n", 
+            "- Use 'Start' to activate the proxy and 'Stop' to deactivate it.\r\n",
             WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_BORDER, 
             10, 470, 780, 100, hWnd, NULL, NULL, NULL);
         break;
