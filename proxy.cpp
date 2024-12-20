@@ -31,8 +31,9 @@
 std::vector<std::string> blacklist;
 std::mutex blacklist_mutex;
 SOCKET serverSocket = INVALID_SOCKET;
-HWND hWnd, hWndList, hWndStart, hWndStop, hWndUrl, hwndHostRunning, hWndClient, hWndThroughput;
+HWND hWnd, hWndList, hWndStart, hWndStop, hWndUrl, hwndMessage, hWndClient, hWndThroughput;
 HWND hWndUserGuide;
+
 
 HINSTANCE hInst;
 HWND hWndLogListView;
@@ -217,11 +218,11 @@ void ClientBoxMessage()
 
 void StatusMessage(std::string message)
 {
-    size_t nrow = SendMessage(hwndHostRunning, LB_GETCOUNT, 0, 0);
+    size_t nrow = SendMessage(hwndMessage, LB_GETCOUNT, 0, 0);
     if (nrow > MAX_LOG_ENTRIES)
-        SendMessage(hwndHostRunning, LB_DELETESTRING, 0, 0);
+        SendMessage(hwndMessage, LB_DELETESTRING, 0, 0);
     std::string s = "[" + GetTime() + "] " + message + "\r\n";
-    SendMessageA(hwndHostRunning, LB_ADDSTRING, 0, (LPARAM)s.c_str());
+    SendMessageA(hwndMessage, LB_ADDSTRING, 0, (LPARAM)s.c_str());
 }
 // Helper function to extract hostname and port from the "Host" header.
 bool parseHostHeader(const std::string &request, std::string &hostname, int &port)
@@ -507,7 +508,7 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
         return;
     }
     st = "Allow";
-    // AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
+    AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
     struct sockaddr_in target_addr = {0};
     target_addr.sin_family = AF_INET;
     target_addr.sin_port = htons(port);
@@ -674,13 +675,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         CreateWindowA("STATIC", "Proxy Log", WS_VISIBLE | WS_CHILD | DS_CENTER, 10, 10, 804, 20, hWnd, NULL, NULL, NULL);
         // Create ListView for Proxy Logs
         hWndLogListView = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTVIEW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS,
-                                         10, 40, 804, 175, hWnd, (HMENU)11, hInst, NULL);
+                                         10, 40, 805, 175, hWnd, (HMENU)11, hInst, NULL);
 
         // Set ListView Columns
         LVCOLUMN lvColumn;
         lvColumn.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM | LVCF_FMT;
 
-        lvColumn.pszText = "Time";
+        char time[] = "Time";
+        lvColumn.pszText = time;
         lvColumn.cx = 150;
         lvColumn.fmt = LVCFMT_CENTER;
         ListView_InsertColumn(hWndLogListView, 0, &lvColumn);
@@ -711,8 +713,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         ListView_InsertColumn(hWndLogListView, 5, &lvColumn);
 
         // Throughput
-        CreateWindowA("STATIC", "Throughput", WS_VISIBLE | WS_CHILD, 10, 220, 250, 20, hWnd, NULL, NULL, NULL);
-        hWndThroughput = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER | DS_CENTER, 10, 250, 250, 170, hWnd, NULL, NULL, NULL);
+        CreateWindowA("STATIC", "Throughput", WS_VISIBLE | WS_CHILD, 10, 220, 275, 20, hWnd, NULL, NULL, NULL);
+        hWndThroughput = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER | DS_CENTER, 10, 250, 275, 170, hWnd, NULL, NULL, NULL);
 
         // Client window
         CreateWindowA("STATIC", "Client connecting", WS_VISIBLE | WS_CHILD, 825, 10, 250, 20, hWnd, NULL, NULL, NULL);
@@ -722,9 +724,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         CreateWindowA("STATIC", "Black List", WS_VISIBLE | WS_CHILD, 825, 220, 250, 20, hWnd, NULL, NULL, NULL);
         hWndList = CreateWindowA("LISTBOX", "", WS_CHILD | WS_VISIBLE | LBS_NOTIFY | WS_BORDER | WS_VSCROLL, 825, 250, 250, 177, hWnd, (HMENU)3, NULL, NULL);
 
-        // Host running window (hwndHostRunning)
-        CreateWindowA("STATIC", "Message", WS_VISIBLE | WS_CHILD, 292, 220, 520, 20, hWnd, NULL, NULL, NULL);
-        hwndHostRunning = CreateWindowA("LISTBOX", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | WS_BORDER, 292, 250, 520, 177, hWnd, (HMENU)6, NULL, NULL);
+        // Message window (hwndMessage)
+        CreateWindowA("STATIC", "Message", WS_VISIBLE | WS_CHILD, 302, 220, 510, 20, hWnd, NULL, NULL, NULL);
+        hwndMessage = CreateWindowA("LISTBOX", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | WS_BORDER, 302, 250, 510, 177, hWnd, (HMENU)6, NULL, NULL);
 
         // Start button
         hWndStart = CreateWindowA("BUTTON", "Start",
@@ -739,17 +741,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         // Textbox for URL input
         hWndUrl = CreateWindowExA(0, "EDIT", "",
                                   WS_CHILD | WS_VISIBLE | WS_BORDER,
-                                  240, 430, 360, 30, hWnd, (HMENU)5, NULL, NULL);
+                                  230, 430, 400, 30, hWnd, (HMENU)5, NULL, NULL);
 
         // Add URL button
         CreateWindowExA(0, "BUTTON", "Add URL",
                         WS_CHILD | WS_VISIBLE,
-                        610, 430, 80, 30, hWnd, (HMENU)3, NULL, NULL);
+                        640, 430, 80, 30, hWnd, (HMENU)3, NULL, NULL);
 
         // Remove button
         CreateWindowA("BUTTON", "Remove",
                       WS_CHILD | WS_VISIBLE,
-                      700, 430, 80, 30, hWnd, (HMENU)4, NULL, NULL);
+                      730, 430, 80, 30, hWnd, (HMENU)4, NULL, NULL);
 
         // Guide for users
         hWndUserGuide = CreateWindowA("EDIT",
@@ -758,7 +760,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                                       "- To remove a Hostname, select it from the blacklist and click 'Remove'.\r\n"
                                       "- Use 'Start' to activate the proxy and 'Stop' to deactivate it.\r\n",
                                       WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_BORDER,
-                                      10, 470, 780, 100, hWnd, NULL, NULL, NULL);
+                                      10, 470, 800, 100, hWnd, NULL, NULL, NULL);
         break;
     }
     case WM_COMMAND:
@@ -831,6 +833,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             {
                 List.pop();
             }
+            SendMessage(hwndMessage, LB_RESETCONTENT, 0, 0);
             StatusMessage("Proxy server started");
             StatusMessage("Proxy is running on port 8888");
             // Create a thread to listen for clients
@@ -857,7 +860,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             ClientBoxMessage();
             // Log the stop event
             std::cout << "Proxy server stopped.\n";
-            SetWindowTextA(hWnd, "Proxy server stopped.\r\n");
+            SendMessage(hwndMessage, LB_RESETCONTENT, 0, 0);
+            StatusMessage("Proxy server stopped.");
         }
         break;
         case 3: // Add URL
