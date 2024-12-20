@@ -18,7 +18,7 @@
 #include <ctime>
 #include <fstream>
 #include <atomic>
-#include <commctrl.h> 
+#include <commctrl.h>
 #include <chrono>
 
 #pragma comment(lib, "ws2_32.lib")
@@ -26,7 +26,6 @@
 #define WM_SOCKET WM_USER + 1
 #define DEFAULT_PORT "8888"
 #define BUFFER_SIZE 4096
-
 
 // Global variables
 std::vector<std::string> blacklist;
@@ -53,89 +52,95 @@ std::set<std::string> active_hosts;
 std::mutex active_hosts_mutex;
 
 // Biến toàn cục để theo dõi số byte gửi và nhận
-std::atomic<size_t> totalBytesClientProxy(0), totalBytesProxyWeb(0); 
-std::atomic<size_t> totalBytesProxyClient(0), totalBytesWebProxy(0); 
+std::atomic<size_t> totalBytesClientProxy(0), totalBytesProxyWeb(0);
+std::atomic<size_t> totalBytesProxyClient(0), totalBytesWebProxy(0);
 
-void processBytesSent(std::atomic<size_t>& totalBytesSent, int byteSent) {
-    if (byteSent > 0) {
-        totalBytesSent += byteSent; 
+void processBytesSent(std::atomic<size_t> &totalBytesSent, int byteSent)
+{
+    if (byteSent > 0)
+    {
+        totalBytesSent += byteSent;
     }
 }
 
-void processBytesReceived(std::atomic<size_t>& totalBytesReceived, int byteReceived) {
-    if (byteReceived > 0) {
-        totalBytesReceived += byteReceived; 
+void processBytesReceived(std::atomic<size_t> &totalBytesReceived, int byteReceived)
+{
+    if (byteReceived > 0)
+    {
+        totalBytesReceived += byteReceived;
     }
 }
 
 void UpdateThroughput(size_t ClientProxy, size_t ProxyWeb, size_t WebProxy, size_t ProxyClient)
 {
 
-    std::string line1 = "Client -> Proxy: " + std::to_string(ClientProxy) + " bytes/s\r\n"; 
-    std::string line2 = "Proxy -> Web Server: " + std::to_string(ProxyWeb) + " bytes/s\r\n"; 
-    std::string line3 = "Client <- Proxy: " + std::to_string(ProxyClient) + " bytes/s\r\n"; 
-    std::string line4 = "Proxy <- Web Server: " + std::to_string(ProxyWeb) + " bytes/s\r\n"; 
+    std::string line1 = "Client -> Proxy: " + std::to_string(ClientProxy) + " bytes/s\r\n";
+    std::string line2 = "Proxy -> Web Server: " + std::to_string(ProxyWeb) + " bytes/s\r\n";
+    std::string line3 = "Client <- Proxy: " + std::to_string(ProxyClient) + " bytes/s\r\n";
+    std::string line4 = "Proxy <- Web Server: " + std::to_string(ProxyWeb) + " bytes/s\r\n";
     SetWindowTextA(hWndThroughput, (line1 + line2 + line3 + line4).c_str());
 }
 
-
 void MonitorThroughput()
 {
-        size_t prevClientProxy = totalBytesClientProxy.load();
-        size_t prevProxyClient = totalBytesProxyClient.load();
-        size_t prevProxyWeb = totalBytesProxyWeb.load();
-        size_t prevWebProxy = totalBytesWebProxy.load();
+    size_t prevClientProxy = totalBytesClientProxy.load();
+    size_t prevProxyClient = totalBytesProxyClient.load();
+    size_t prevProxyWeb = totalBytesProxyWeb.load();
+    size_t prevWebProxy = totalBytesWebProxy.load();
 
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    size_t currentClientProxy = totalBytesClientProxy.load();
+    size_t currentProxyClient = totalBytesProxyClient.load();
+    size_t currentProxyWeb = totalBytesProxyWeb.load();
+    size_t currentWebProxy = totalBytesWebProxy.load();
 
-        size_t currentClientProxy = totalBytesClientProxy.load();
-        size_t currentProxyClient = totalBytesProxyClient.load();
-        size_t currentProxyWeb = totalBytesProxyWeb.load();
-        size_t currentWebProxy = totalBytesWebProxy.load();
+    size_t sentClientProxy = currentClientProxy - prevClientProxy;
+    size_t receivedProxyClient = currentProxyClient - prevProxyClient;
+    size_t sentProxyWeb = currentProxyWeb - prevProxyWeb;
+    size_t receivedWebProxy = currentWebProxy - prevWebProxy;
 
-        size_t sentClientProxy = currentClientProxy - prevClientProxy;
-        size_t receivedProxyClient = currentProxyClient - prevProxyClient;
-        size_t sentProxyWeb = currentProxyWeb - prevProxyWeb;
-        size_t receivedWebProxy = currentWebProxy - prevWebProxy;
-
-        // Add to Throughput
-        UpdateThroughput(sentClientProxy,sentProxyWeb,receivedWebProxy,receivedProxyClient);
+    // Add to Throughput
+    UpdateThroughput(sentClientProxy, sentProxyWeb, receivedWebProxy, receivedProxyClient);
 }
 
-std::string getLogFileName() {
+std::string getLogFileName()
+{
     std::time_t now = std::time(nullptr);
-    std::tm* localTime = std::localtime(&now);
-    char buffer[20];+
-    std::strftime(buffer, sizeof(buffer), "log-%d-%m-%Y.txt", localTime);
+    std::tm *localTime = std::localtime(&now);
+    char buffer[20];
+    +std::strftime(buffer, sizeof(buffer), "log-%d-%m-%Y.txt", localTime);
 
     return std::string(buffer);
 }
 
-void logMessageToFile(const std::string& message) {
+void logMessageToFile(const std::string &message)
+{
     std::string logFileName = getLogFileName();
 
     std::fstream logFile(logFileName, std::ios::app);
-    if (!logFile.is_open()) {
+    if (!logFile.is_open())
+    {
         std::cerr << "Failed to open the log file: " << logFileName << "\n";
         return;
     }
 
     std::time_t now = std::time(nullptr);
-    std::tm* localTime = std::localtime(&now);
+    std::tm *localTime = std::localtime(&now);
 
     char timeBuffer[20];
     std::strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S", localTime);
     {
-    std::lock_guard<std::mutex> lock(log_mutex);
-    logFile << "[" << timeBuffer << "] " << message << "\n";
+        std::lock_guard<std::mutex> lock(log_mutex);
+        logFile << "[" << timeBuffer << "] " << message << "\n";
     }
 
     logFile.close();
 }
 
-void AddLogEntry(const std::string& time, const std::string& clientIP, const std::string& host, const std::string& method, const std::string& version, const std::string& status) {
-    
+void AddLogEntry(const std::string &time, const std::string &clientIP, const std::string &host, const std::string &method, const std::string &version, const std::string &status)
+{
+
     std::lock_guard<std::mutex> lock(log_mutex);
     int rowCount = ListView_GetItemCount(hWndLogListView);
     if (rowCount > MAX_LOG_ENTRIES)
@@ -148,41 +153,40 @@ void AddLogEntry(const std::string& time, const std::string& clientIP, const std
     // Insert Time
     lvItem.iItem = ListView_GetItemCount(hWndLogListView);
     lvItem.iSubItem = 0;
-    lvItem.pszText = const_cast<char*>(time.c_str());
+    lvItem.pszText = const_cast<char *>(time.c_str());
     ListView_InsertItem(hWndLogListView, &lvItem);
 
     // Insert Client IP
     lvItem.iSubItem = 1;
-    lvItem.pszText = const_cast<char*>(clientIP.c_str());
+    lvItem.pszText = const_cast<char *>(clientIP.c_str());
     ListView_SetItem(hWndLogListView, &lvItem);
 
     // Insert Host
     lvItem.iSubItem = 2;
-    lvItem.pszText = const_cast<char*>(host.c_str());
+    lvItem.pszText = const_cast<char *>(host.c_str());
     ListView_SetItem(hWndLogListView, &lvItem);
 
     // Insert Method
     lvItem.iSubItem = 3;
-    lvItem.pszText = const_cast<char*>(method.c_str());
+    lvItem.pszText = const_cast<char *>(method.c_str());
     ListView_SetItem(hWndLogListView, &lvItem);
 
     // Insert Version
     lvItem.iSubItem = 4;
-    lvItem.pszText = const_cast<char*>(version.c_str());
+    lvItem.pszText = const_cast<char *>(version.c_str());
     ListView_SetItem(hWndLogListView, &lvItem);
 
     // Insert status
-    lvItem.iSubItem = 5;  // Cột Status
-    lvItem.pszText = const_cast<char*>(status.c_str());
+    lvItem.iSubItem = 5; // Cột Status
+    lvItem.pszText = const_cast<char *>(status.c_str());
     ListView_SetItem(hWndLogListView, &lvItem);
-
 }
 std::string GetTime()
 {
     std::time_t now = std::time(nullptr);
-    std::tm* localTime = std::localtime(&now);
+    std::tm *localTime = std::localtime(&now);
 
-    char timeBuffer[20]; 
+    char timeBuffer[20];
     std::strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S %d/%m/%Y", localTime);
     std::string currentTime(timeBuffer);
     return currentTime;
@@ -201,7 +205,7 @@ std::string GetIP(SOCKET clientSocket)
 void ClientBoxMessage()
 {
     std::string content;
-    for(auto client:Clients)
+    for (auto client : Clients)
     {
         content += client + "\r\n";
     }
@@ -214,8 +218,9 @@ void ClientBoxMessage()
 void StatusMessage(std::string message)
 {
     size_t nrow = SendMessage(hwndHostRunning, LB_GETCOUNT, 0, 0);
-    if( nrow > MAX_LOG_ENTRIES)  SendMessage(hwndHostRunning, LB_DELETESTRING, 0, 0);
-    std::string s = "[" + GetTime() + "] " + message + "\r\n"; 
+    if (nrow > MAX_LOG_ENTRIES)
+        SendMessage(hwndHostRunning, LB_DELETESTRING, 0, 0);
+    std::string s = "[" + GetTime() + "] " + message + "\r\n";
     SendMessageA(hwndHostRunning, LB_ADDSTRING, 0, (LPARAM)s.c_str());
 }
 // Helper function to extract hostname and port from the "Host" header.
@@ -279,7 +284,7 @@ bool resolve_hostname(const char *hostname, struct sockaddr_in &server)
         server.sin_addr = addr->sin_addr;
         char *ip_str = inet_ntoa(server.sin_addr);
         std::string s(hostname);
-        std:: string t(ip_str);
+        std::string t(ip_str);
         // logMessage(s + " --> " + t + "\n");
         logMessageToFile(s + " --> " + t + "\n");
         freeaddrinfo(res);
@@ -288,7 +293,7 @@ bool resolve_hostname(const char *hostname, struct sockaddr_in &server)
     else
     {
         std::string s(hostname);
-        StatusMessage("Failed to resolve hostname: " + s );
+        StatusMessage("Failed to resolve hostname: " + s);
         logMessageToFile("Failed to resolve hostname: " + s + "\n");
         return false;
     }
@@ -319,7 +324,6 @@ void add_to_blacklist(const std::string &url)
     std::regex url_regex(R"(^(?:(http|https):\/\/)?([^:\/]+)(?::(\d+))?(\/.*)?$)");
     std::smatch url_match;
 
-    
     if (std::regex_match(url, url_match, url_regex))
     {
         hostname = url_match[2].str();
@@ -351,7 +355,7 @@ void add_to_blacklist(const std::string &url)
 // Function to handle CONNECT requests
 void handleHttpsRequest(SOCKET client_socket, const std::string &request)
 {
-    std::string st = "Pending"; 
+    std::string st = "Pending";
     // Extract hostname and port from CONNECT request
     char hostname[256] = {0};
     int port = 0;
@@ -363,10 +367,10 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     {
         std::cerr << "Error parsing CONNECT request\n";
         int byteSent = send(client_socket, "HTTP/1.1 400 Bad Request\r\n\r\n", 26, 0);
-        processBytesSent(totalBytesProxyClient, byteSent); 
+        processBytesSent(totalBytesProxyClient, byteSent);
         closesocket(client_socket);
         st = "Error";
-        AddLogEntry(GetTime(),GetIP(client_socket),hostname,method,version,st);
+        AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, version, st);
         return;
     }
 
@@ -375,15 +379,18 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     {
         std::string response = "HTTP/1.1 403 Forbidden\r\n\r\n";
         int byteSent = send(client_socket, response.c_str(), response.length(), 0);
-        processBytesSent(totalBytesProxyClient, byteSent); 
+        processBytesSent(totalBytesProxyClient, byteSent);
         closesocket(client_socket);
         st = "Blocked";
-        AddLogEntry(GetTime(),GetIP(client_socket),hostname,method,version,st);
+        AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, version, st);
         return;
     }
 
     // Establish connection to the target server
-    struct sockaddr_in target_addr{0};
+    struct sockaddr_in target_addr
+    {
+        0
+    };
     target_addr.sin_family = AF_INET;
     target_addr.sin_port = htons(port);
     resolve_hostname(hostname, target_addr);
@@ -394,24 +401,24 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     {
         StatusMessage("Failed to connect to target: " + std::string(hostname) + ":" + std::to_string(port) + " Error: " + std::to_string(WSAGetLastError()));
         int byteSent = send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
-        processBytesSent(totalBytesProxyClient, byteSent); 
+        processBytesSent(totalBytesProxyClient, byteSent);
         closesocket(client_socket);
         st = "Error";
-        AddLogEntry(GetTime(),GetIP(client_socket),hostname,method,version,st);
+        AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, version, st);
         return;
     }
 
     // Send connection established response to the client
     const char *connection_established = "HTTP/1.1 200 Connection Established\r\n\r\n";
     int byteSent = send(client_socket, connection_established, strlen(connection_established), 0);
-    processBytesSent(totalBytesProxyClient, byteSent); 
+    processBytesSent(totalBytesProxyClient, byteSent);
 
     // Relay data between client and server (this will forward encrypted data for HTTPS)
     fd_set fdset;
     std::array<char, BUFFER_SIZE> relay_buffer;
     while (true)
     {
-        
+
         FD_ZERO(&fdset);
         FD_SET(client_socket, &fdset);
         FD_SET(target_socket, &fdset);
@@ -420,10 +427,10 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         if (activity <= 0)
             break;
 
-        if(is_blacklisted(hostname))
+        if (is_blacklisted(hostname))
         {
             st = "Blocked";
-            AddLogEntry(GetTime(),GetIP(client_socket),hostname,method,version,st);
+            AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, version, st);
             break;
         }
         // Forward data from client to target
@@ -434,7 +441,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
                 break;
             processBytesReceived(totalBytesClientProxy, recv_size);
             int byteSent = send(target_socket, relay_buffer.data(), recv_size, 0);
-            processBytesSent(totalBytesProxyWeb, byteSent); 
+            processBytesSent(totalBytesProxyWeb, byteSent);
         }
 
         // Forward data from target to client
@@ -443,9 +450,9 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
             int recv_size = recv(target_socket, relay_buffer.data(), relay_buffer.size(), 0);
             if (recv_size <= 0)
                 break;
-            processBytesReceived(totalBytesWebProxy,recv_size);
+            processBytesReceived(totalBytesWebProxy, recv_size);
             int byteSent = send(client_socket, relay_buffer.data(), recv_size, 0);
-            processBytesSent(totalBytesProxyClient, byteSent); 
+            processBytesSent(totalBytesProxyClient, byteSent);
         }
         st = "Allow";
         AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, version, st);
@@ -469,7 +476,7 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
         st = "Error";
         AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
         int byteSent = send(client_socket, "HTTP/1.1 400 Bad Request\r\n\r\n", 26, 0);
-        processBytesSent(totalBytesProxyClient, byteSent); 
+        processBytesSent(totalBytesProxyClient, byteSent);
         closesocket(client_socket);
         return;
     }
@@ -483,7 +490,7 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
         st = "Error";
         AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
         int byteSent = send(client_socket, "HTTP/1.1 400 Bad Request\r\n\r\n", 26, 0);
-        processBytesSent(totalBytesProxyClient, byteSent); 
+        processBytesSent(totalBytesProxyClient, byteSent);
         closesocket(client_socket);
         return;
     }
@@ -493,26 +500,25 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     {
         std::string response = "HTTP/1.1 403 Forbidden\r\n\r\n";
         int byteSent = send(client_socket, response.c_str(), response.length(), 0);
-        processBytesSent(totalBytesProxyClient, byteSent); 
+        processBytesSent(totalBytesProxyClient, byteSent);
         closesocket(client_socket);
         st = "Blocked";
         AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
         return;
     }
     st = "Allow";
-    AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
+    // AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
     struct sockaddr_in target_addr = {0};
     target_addr.sin_family = AF_INET;
     target_addr.sin_port = htons(port);
     resolve_hostname(hostname.c_str(), target_addr);
-    
 
     SOCKET target_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(target_socket, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0)
     {
         StatusMessage("Failed to connect to HTTP target: " + std::string(hostname));
         int byteSent = send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
-        processBytesSent(totalBytesProxyClient, byteSent); 
+        processBytesSent(totalBytesProxyClient, byteSent);
         closesocket(client_socket);
         st = "Error";
         AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
@@ -520,7 +526,7 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     }
 
     int byteSent = send(target_socket, request.c_str(), request.length(), 0);
-    processBytesSent(totalBytesProxyWeb, byteSent); 
+    processBytesSent(totalBytesProxyWeb, byteSent);
 
     // Relay response back to client
     std::array<char, BUFFER_SIZE> buffer;
@@ -528,19 +534,22 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     bool relay_started = false;
     while ((recv_size = recv(target_socket, buffer.data(), buffer.size(), 0)) > 0)
     {
-        processBytesReceived(totalBytesWebProxy,recv_size);
-        if(is_blacklisted(hostname))
+        std::cout << 1 << "\n";
+        processBytesReceived(totalBytesWebProxy, recv_size);
+        if (is_blacklisted(hostname))
         {
             st = "Blocked";
             AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
             break;
         }
-        if (!relay_started) {
+        if (!relay_started)
+        {
             st = "Allow";
             AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, protocol, st);
             relay_started = true;
         }
-
+        int byteSent = send(client_socket, buffer.data(), recv_size, 0);
+        processBytesSent(totalBytesProxyClient, byteSent);
     }
 
     st = "Close";
@@ -562,20 +571,20 @@ void handleClient(SOCKET clientSocket)
     std::string s(clientIP);
     std::string method, hostname, port, version;
     std::string st = "Pending";
-    
+
     if (recvSize == SOCKET_ERROR)
     {
         st = "Error";
         closesocket(clientSocket);
         return;
     }
-    processBytesReceived(totalBytesClientProxy, recvSize); 
+    processBytesReceived(totalBytesClientProxy, recvSize);
     buffer[recvSize] = '\0';
     std::string request(buffer);
     std::stringstream buf(request);
     buf >> method >> hostname >> version;
-        std::string time = GetTime();
-    AddLogEntry(time,clientIP,hostname,method,version, st);
+    std::string time = GetTime();
+    AddLogEntry(time, clientIP, hostname, method, version, st);
 
     if (request.find("CONNECT") == 0)
     {
@@ -585,12 +594,14 @@ void handleClient(SOCKET clientSocket)
     {
         handleHttpRequest(clientSocket, request);
     }
-    else {
-    st = "Error";
-    AddLogEntry(GetTime(), clientIP, hostname, method, version, st);
+    else
+    {
+        st = "Error";
+        AddLogEntry(GetTime(), clientIP, hostname, method, version, st);
     }
 
-    if(!Clients.empty()) Clients.erase(clientIP);
+    if (!Clients.empty())
+        Clients.erase(clientIP);
     closesocket(clientSocket);
 }
 
@@ -609,16 +620,17 @@ void listenForClients()
         std::string s(clientIP);
         Clients.insert(s);
         bool exist = 0;
-        for(auto client : CurrentClients)
+        for (auto client : CurrentClients)
         {
-            if( s == client)
+            if (s == client)
             {
                 exist = 1;
                 break;
             }
         }
         // std::cout<< Clients.size() << " " << CurrentClients.size() << "\n";
-        if(!exist) CurrentClients.push_back(s);
+        if (!exist)
+            CurrentClients.push_back(s);
         if (clientSocket == INVALID_SOCKET)
         {
             if (running)
@@ -655,239 +667,240 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
-        case WM_CREATE:
-        {
-            // Create controls
-            // Log window (hWnd)
-            CreateWindowA("STATIC", "Proxy Log", WS_VISIBLE | WS_CHILD | DS_CENTER, 10, 10, 804, 20, hWnd, NULL, NULL, NULL);
+    case WM_CREATE:
+    {
+        // Create controls
+        // Log window (hWnd)
+        CreateWindowA("STATIC", "Proxy Log", WS_VISIBLE | WS_CHILD | DS_CENTER, 10, 10, 804, 20, hWnd, NULL, NULL, NULL);
         // Create ListView for Proxy Logs
-            hWndLogListView = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTVIEW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS,
-                                            10, 40, 804, 175, hWnd, (HMENU)11, hInst, NULL);
+        hWndLogListView = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTVIEW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS,
+                                         10, 40, 804, 175, hWnd, (HMENU)11, hInst, NULL);
 
-            
-            // Set ListView Columns
-            LVCOLUMN lvColumn;
-            lvColumn.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM | LVCF_FMT;
+        // Set ListView Columns
+        LVCOLUMN lvColumn;
+        lvColumn.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM | LVCF_FMT;
 
-            lvColumn.pszText = "Time";
-            lvColumn.cx = 150;
-            lvColumn.fmt = LVCFMT_CENTER;
-            ListView_InsertColumn(hWndLogListView, 0, &lvColumn);
+        lvColumn.pszText = "Time";
+        lvColumn.cx = 150;
+        lvColumn.fmt = LVCFMT_CENTER;
+        ListView_InsertColumn(hWndLogListView, 0, &lvColumn);
 
-            lvColumn.pszText = "Client IP";
-            lvColumn.cx = 100;
-            lvColumn.fmt = LVCFMT_CENTER;
-            ListView_InsertColumn(hWndLogListView, 1, &lvColumn);
+        lvColumn.pszText = "Client IP";
+        lvColumn.cx = 100;
+        lvColumn.fmt = LVCFMT_CENTER;
+        ListView_InsertColumn(hWndLogListView, 1, &lvColumn);
 
-            lvColumn.pszText = "Host";
-            lvColumn.cx = 250;
-            lvColumn.fmt = LVCFMT_CENTER;
-            ListView_InsertColumn(hWndLogListView, 2, &lvColumn);
+        lvColumn.pszText = "Host";
+        lvColumn.cx = 250;
+        lvColumn.fmt = LVCFMT_CENTER;
+        ListView_InsertColumn(hWndLogListView, 2, &lvColumn);
 
-            lvColumn.pszText = "Method";
-            lvColumn.cx = 100;
-            lvColumn.fmt = LVCFMT_CENTER;
-            ListView_InsertColumn(hWndLogListView, 3, &lvColumn);
+        lvColumn.pszText = "Method";
+        lvColumn.cx = 100;
+        lvColumn.fmt = LVCFMT_CENTER;
+        ListView_InsertColumn(hWndLogListView, 3, &lvColumn);
 
-            lvColumn.pszText = "Version";
-            lvColumn.cx = 100;
-            lvColumn.fmt = LVCFMT_CENTER;
-            ListView_InsertColumn(hWndLogListView, 4, &lvColumn);
+        lvColumn.pszText = "Version";
+        lvColumn.cx = 100;
+        lvColumn.fmt = LVCFMT_CENTER;
+        ListView_InsertColumn(hWndLogListView, 4, &lvColumn);
 
-            lvColumn.pszText = "Status";
-            lvColumn.cx = 100;
-            lvColumn.fmt = LVCFMT_CENTER;
-            ListView_InsertColumn(hWndLogListView, 5, &lvColumn);
+        lvColumn.pszText = "Status";
+        lvColumn.cx = 100;
+        lvColumn.fmt = LVCFMT_CENTER;
+        ListView_InsertColumn(hWndLogListView, 5, &lvColumn);
 
-            // Throughput
-            CreateWindowA("STATIC", "Throughput", WS_VISIBLE | WS_CHILD, 10, 220, 250, 20, hWnd, NULL, NULL, NULL);
-            hWndThroughput = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER | DS_CENTER, 10, 250, 250, 175, hWnd, NULL, NULL, NULL);
+        // Throughput
+        CreateWindowA("STATIC", "Throughput", WS_VISIBLE | WS_CHILD, 10, 220, 250, 20, hWnd, NULL, NULL, NULL);
+        hWndThroughput = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER | DS_CENTER, 10, 250, 250, 170, hWnd, NULL, NULL, NULL);
 
-            // Client window
-            CreateWindowA("STATIC", "Client connecting", WS_VISIBLE | WS_CHILD, 825, 10, 250, 20, hWnd, NULL, NULL, NULL);
-            hWndClient = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER | DS_CENTER, 825, 40, 250, 175, hWnd, NULL, NULL, NULL);
+        // Client window
+        CreateWindowA("STATIC", "Client connecting", WS_VISIBLE | WS_CHILD, 825, 10, 250, 20, hWnd, NULL, NULL, NULL);
+        hWndClient = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | WS_BORDER | DS_CENTER, 825, 40, 250, 175, hWnd, NULL, NULL, NULL);
 
-            // Blacklist window (hWndList)
-            hWndList = CreateWindowA("LISTBOX", "Blacklist", WS_CHILD | WS_VISIBLE | LBS_NOTIFY | WS_BORDER | WS_VSCROLL | WS_CAPTION, 825, 220, 250, 200, hWnd, (HMENU)3, NULL, NULL);
+        // Blacklist window (hWndList)
+        CreateWindowA("STATIC", "Black List", WS_VISIBLE | WS_CHILD, 825, 220, 250, 20, hWnd, NULL, NULL, NULL);
+        hWndList = CreateWindowA("LISTBOX", "", WS_CHILD | WS_VISIBLE | LBS_NOTIFY | WS_BORDER | WS_VSCROLL, 825, 250, 250, 177, hWnd, (HMENU)3, NULL, NULL);
 
-            // Host running window (hwndHostRunning)
-            hwndHostRunning = CreateWindowA("LISTBOX", "Message", WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | WS_BORDER | WS_CAPTION , 292, 220, 520, 200, hWnd, (HMENU)6, NULL, NULL);
+        // Host running window (hwndHostRunning)
+        CreateWindowA("STATIC", "Message", WS_VISIBLE | WS_CHILD, 292, 220, 520, 20, hWnd, NULL, NULL, NULL);
+        hwndHostRunning = CreateWindowA("LISTBOX", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | WS_BORDER, 292, 250, 520, 177, hWnd, (HMENU)6, NULL, NULL);
 
-            // Start button
-            hWndStart = CreateWindowA("BUTTON", "Start",
-                                    WS_CHILD | WS_VISIBLE,
-                                    10, 430, 100, 30, hWnd, (HMENU)1, NULL, NULL);
+        // Start button
+        hWndStart = CreateWindowA("BUTTON", "Start",
+                                  WS_CHILD | WS_VISIBLE,
+                                  10, 430, 100, 30, hWnd, (HMENU)1, NULL, NULL);
 
-            // Stop button
-            hWndStop = CreateWindowA("BUTTON", "Stop",
-                                    WS_CHILD | WS_VISIBLE | WS_DISABLED,
-                                    120, 430, 100, 30, hWnd, (HMENU)2, NULL, NULL);
+        // Stop button
+        hWndStop = CreateWindowA("BUTTON", "Stop",
+                                 WS_CHILD | WS_VISIBLE | WS_DISABLED,
+                                 120, 430, 100, 30, hWnd, (HMENU)2, NULL, NULL);
 
-            // Textbox for URL input
-            hWndUrl = CreateWindowExA(0, "EDIT", "",
-                                    WS_CHILD | WS_VISIBLE | WS_BORDER,
-                                    240, 430, 360, 30, hWnd, (HMENU)5, NULL, NULL);
+        // Textbox for URL input
+        hWndUrl = CreateWindowExA(0, "EDIT", "",
+                                  WS_CHILD | WS_VISIBLE | WS_BORDER,
+                                  240, 430, 360, 30, hWnd, (HMENU)5, NULL, NULL);
 
-            // Add URL button
-            CreateWindowExA(0, "BUTTON", "Add URL",
-                            WS_CHILD | WS_VISIBLE,
-                            610, 430, 80, 30, hWnd, (HMENU)3, NULL, NULL);
-
-            // Remove button
-            CreateWindowA("BUTTON", "Remove",
+        // Add URL button
+        CreateWindowExA(0, "BUTTON", "Add URL",
                         WS_CHILD | WS_VISIBLE,
-                        700, 430, 80, 30, hWnd, (HMENU)4, NULL, NULL);
-            
-            // Guide for users
-            hWndUserGuide = CreateWindowA("EDIT", 
-            "User Guide:\r\n"
-            "- To add a Hostname to the blacklist, enter it in the input box and click 'Add URL'.\r\n"
-            "- To remove a Hostname, select it from the blacklist and click 'Remove'.\r\n"
-            "- Use 'Start' to activate the proxy and 'Stop' to deactivate it.\r\n",
-            WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_BORDER, 
-            10, 470, 780, 100, hWnd, NULL, NULL, NULL);
+                        610, 430, 80, 30, hWnd, (HMENU)3, NULL, NULL);
+
+        // Remove button
+        CreateWindowA("BUTTON", "Remove",
+                      WS_CHILD | WS_VISIBLE,
+                      700, 430, 80, 30, hWnd, (HMENU)4, NULL, NULL);
+
+        // Guide for users
+        hWndUserGuide = CreateWindowA("EDIT",
+                                      "User Guide:\r\n"
+                                      "- To add a Hostname to the blacklist, enter it in the input box and click 'Add URL'.\r\n"
+                                      "- To remove a Hostname, select it from the blacklist and click 'Remove'.\r\n"
+                                      "- Use 'Start' to activate the proxy and 'Stop' to deactivate it.\r\n",
+                                      WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_BORDER,
+                                      10, 470, 780, 100, hWnd, NULL, NULL, NULL);
         break;
-        }
-        case WM_COMMAND:
+    }
+    case WM_COMMAND:
+    {
+        switch (LOWORD(wParam))
         {
-            switch (LOWORD(wParam))
+        case 1: // Start
+        {
+            // Initialize Winsock
+            WSADATA wsaData;
+            if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
             {
-            case 1: // Start
-            {
-                // Initialize Winsock
-                WSADATA wsaData;
-                if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
-                {
-                    MessageBoxA(hWnd, "Failed to initialize Winsock", "Error", MB_OK | MB_ICONERROR);
-                    return 1;
-                }
-
-                // Create socket
-                serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-                if (serverSocket == INVALID_SOCKET)
-                {
-                    MessageBoxA(hWnd, "Failed to create socket", "Error", MB_OK | MB_ICONERROR);
-                    WSACleanup();
-                    return 1;
-                }
-
-                // Set up address and port
-                struct addrinfo *result = NULL, *ptr = NULL, hints;
-                ZeroMemory(&hints, sizeof(hints));
-                hints.ai_family = AF_INET;
-                hints.ai_socktype = SOCK_STREAM;
-                hints.ai_protocol = IPPROTO_TCP;
-                hints.ai_flags = AI_PASSIVE;
-
-                if (getaddrinfo(NULL, DEFAULT_PORT, &hints, &result) != 0)
-                {
-                    MessageBoxA(hWnd, "getaddrinfo failed", "Error", MB_OK | MB_ICONERROR);
-                    WSACleanup();
-                    return 1;
-                }
-
-                // Bind socket
-                if (bind(serverSocket, result->ai_addr, (int)result->ai_addrlen) == SOCKET_ERROR)
-                {
-                    MessageBoxA(hWnd, "bind failed", "Error", MB_OK | MB_ICONERROR);
-                    freeaddrinfo(result);
-                    closesocket(serverSocket);
-                    WSACleanup();
-                    return 1;
-                }
-
-                freeaddrinfo(result);
-
-                // Listen for connections
-                if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR)
-                {
-                    MessageBoxA(hWnd, "listen failed", "Error", MB_OK | MB_ICONERROR);
-                    closesocket(serverSocket);
-                    WSACleanup();
-                    return 1;
-                }
-
-                // Enable/disable Start/Stop buttons
-                EnableWindow(hWndStart, FALSE);
-                EnableWindow(hWndStop, TRUE);
-
-                // Log the start event
-                std::cout << "Proxy server started.\n";
-                std::cout << "Proxy is running on port 8888\n";
-                while (!List.empty())
-                {
-                    List.pop();
-                }
-                StatusMessage("Proxy server started");
-                StatusMessage("Proxy is running on port 8888");
-                // Create a thread to listen for clients
-                running = true;
-                std::thread listenThread(listenForClients);
-                listenThread.detach();
+                MessageBoxA(hWnd, "Failed to initialize Winsock", "Error", MB_OK | MB_ICONERROR);
+                return 1;
             }
-            break;
-            case 2: // Stop
+
+            // Create socket
+            serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+            if (serverSocket == INVALID_SOCKET)
             {
-                // Stop the proxy server
-                running = false;
+                MessageBoxA(hWnd, "Failed to create socket", "Error", MB_OK | MB_ICONERROR);
+                WSACleanup();
+                return 1;
+            }
+
+            // Set up address and port
+            struct addrinfo *result = NULL, *ptr = NULL, hints;
+            ZeroMemory(&hints, sizeof(hints));
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            hints.ai_protocol = IPPROTO_TCP;
+            hints.ai_flags = AI_PASSIVE;
+
+            if (getaddrinfo(NULL, DEFAULT_PORT, &hints, &result) != 0)
+            {
+                MessageBoxA(hWnd, "getaddrinfo failed", "Error", MB_OK | MB_ICONERROR);
+                WSACleanup();
+                return 1;
+            }
+
+            // Bind socket
+            if (bind(serverSocket, result->ai_addr, (int)result->ai_addrlen) == SOCKET_ERROR)
+            {
+                MessageBoxA(hWnd, "bind failed", "Error", MB_OK | MB_ICONERROR);
+                freeaddrinfo(result);
                 closesocket(serverSocket);
                 WSACleanup();
+                return 1;
+            }
 
-                // Enable/disable Start/Stop buttons
-                EnableWindow(hWndStart, TRUE);
-                EnableWindow(hWndStop, FALSE);
-                while (!List.empty())
-                {
-                    List.pop();
-                }
-                Clients.clear();
-                ClientBoxMessage();
-                // Log the stop event
-                std::cout << "Proxy server stopped.\n";
-                SetWindowTextA(hWnd,"Proxy server stopped.\r\n");
-            }
-            break;
-            case 3: // Add URL
+            freeaddrinfo(result);
+
+            // Listen for connections
+            if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR)
             {
-                char url[256];
-                GetWindowTextA(hWndUrl, url, 256);
-                // Thêm URL vào blacklist
-                if (strlen(url) > 0)
-                {
-                    add_to_blacklist(url);
-                    SetWindowTextA(hWndUrl, "");
-                }
+                MessageBoxA(hWnd, "listen failed", "Error", MB_OK | MB_ICONERROR);
+                closesocket(serverSocket);
+                WSACleanup();
+                return 1;
             }
-            break;
-            case 4: // Remove
+
+            // Enable/disable Start/Stop buttons
+            EnableWindow(hWndStart, FALSE);
+            EnableWindow(hWndStop, TRUE);
+
+            // Log the start event
+            std::cout << "Proxy server started.\n";
+            std::cout << "Proxy is running on port 8888\n";
+            while (!List.empty())
             {
-                int index = SendMessage(hWndList, LB_GETCURSEL, 0, 0);
-                removeBlacklistUrl(index);
+                List.pop();
             }
-            break;
-            }
-            break;
+            StatusMessage("Proxy server started");
+            StatusMessage("Proxy is running on port 8888");
+            // Create a thread to listen for clients
+            running = true;
+            std::thread listenThread(listenForClients);
+            listenThread.detach();
         }
-        case WM_CHAR:
+        break;
+        case 2: // Stop
         {
-            if (LOWORD(wParam) == VK_RETURN)
-            { // Check if Enter key is pressed
-                char url[256];
-                GetWindowTextA(hWndUrl, url, 256);
-                // Thêm URL vào blacklist
-                if (strlen(url) > 0)
-                {
-                    add_to_blacklist(url);
-                    SetWindowTextA(hWndUrl, ""); // Clear the textbox after adding URL
-                }
+            // Stop the proxy server
+            running = false;
+            closesocket(serverSocket);
+            WSACleanup();
+
+            // Enable/disable Start/Stop buttons
+            EnableWindow(hWndStart, TRUE);
+            EnableWindow(hWndStop, FALSE);
+            while (!List.empty())
+            {
+                List.pop();
             }
-            break;
+            Clients.clear();
+            ClientBoxMessage();
+            // Log the stop event
+            std::cout << "Proxy server stopped.\n";
+            SetWindowTextA(hWnd, "Proxy server stopped.\r\n");
         }
-        case WM_DESTROY:
-            PostQuitMessage(0);
-            break;
-        default:
-            return DefWindowProc(hWnd, message, wParam, lParam);
+        break;
+        case 3: // Add URL
+        {
+            char url[256];
+            GetWindowTextA(hWndUrl, url, 256);
+            // Thêm URL vào blacklist
+            if (strlen(url) > 0)
+            {
+                add_to_blacklist(url);
+                SetWindowTextA(hWndUrl, "");
+            }
+        }
+        break;
+        case 4: // Remove
+        {
+            int index = SendMessage(hWndList, LB_GETCURSEL, 0, 0);
+            removeBlacklistUrl(index);
+        }
+        break;
+        }
+        break;
+    }
+    case WM_CHAR:
+    {
+        if (LOWORD(wParam) == VK_RETURN)
+        { // Check if Enter key is pressed
+            char url[256];
+            GetWindowTextA(hWndUrl, url, 256);
+            // Thêm URL vào blacklist
+            if (strlen(url) > 0)
+            {
+                add_to_blacklist(url);
+                SetWindowTextA(hWndUrl, ""); // Clear the textbox after adding URL
+            }
+        }
+        break;
+    }
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
 }
