@@ -642,7 +642,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             // Create controls
             // Log window (hWnd)
-            CreateWindowA("STATIC", "Request from clients", WS_VISIBLE | WS_CHILD | DS_CENTER, 10, 10, 570, 20, hWnd, NULL, NULL, NULL);
+            CreateWindowA("STATIC", "Proxy Log", WS_VISIBLE | WS_CHILD | DS_CENTER, 10, 10, 570, 20, hWnd, NULL, NULL, NULL);
 // Create ListView for Proxy Logs
         hWndLogListView = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTVIEW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS,
                                          10, 40, 570, 175, hWnd, (HMENU)1, hInst, NULL);
