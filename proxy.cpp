@@ -27,6 +27,7 @@
 #define BUFFER_SIZE 4096
 
 
+
 // Global variables
 std::vector<std::string> blacklist;
 std::mutex blacklist_mutex;
@@ -53,7 +54,6 @@ std::mutex active_hosts_mutex;
 
 static std::atomic<int> activeConnections(0);
 
-std::string st;
 
 
 
@@ -139,6 +139,18 @@ std::string GetTime()
     std::strftime(timeBuffer, sizeof(timeBuffer), "%H:%M:%S %d/%m/%Y", localTime);
     std::string currentTime(timeBuffer);
     return currentTime;
+}
+
+std::string GetIP(SOCKET clientSocket)
+{
+    char buffer[BUFFER_SIZE];
+    struct sockaddr_in clientAddr = {};
+    int clientAddrLen = sizeof(clientAddr);
+    getpeername(clientSocket, (struct sockaddr *)&clientAddr, &clientAddrLen);
+    int recvSize = recv(clientSocket, buffer, BUFFER_SIZE - 1, 0);    
+    char clientIP[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN);
+    return std::string(clientIP);
 }
 
 void ClientBoxMessage()
@@ -328,15 +340,21 @@ void add_to_blacklist(const std::string &url)
 // Function to handle CONNECT requests
 void handleHttpsRequest(SOCKET client_socket, const std::string &request)
 {
+    std::string st = "Pending"; 
     // Extract hostname and port from CONNECT request
     char hostname[256] = {0};
     int port = 0;
+    std::stringstream s(request);
+    std::string method, host, version;
+    s >> method >> host >> version;
 
     if (sscanf(request.c_str(), "CONNECT %255[^:]:%d", hostname, &port) != 2)
     {
         std::cerr << "Error parsing CONNECT request\n";
         send(client_socket, "HTTP/1.1 400 Bad Request\r\n\r\n", 26, 0);
         closesocket(client_socket);
+        st = "Error";
+        AddLogEntry(GetTime(),GetIP(client_socket),hostname,method,version,st);
         return;
     }
 
@@ -347,6 +365,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         send(client_socket, response.c_str(), response.length(), 0);
         closesocket(client_socket);
         st = "Blocked";
+        AddLogEntry(GetTime(),GetIP(client_socket),hostname,method,version,st);
         return;
     }
     addToHostRunning(hostname);
@@ -356,7 +375,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
     target_addr.sin_family = AF_INET;
     target_addr.sin_port = htons(port);
     resolve_hostname(hostname, target_addr);
-    std::string s(hostname);
+    std::string ss(hostname);
 
     SOCKET target_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(target_socket, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0)
@@ -365,6 +384,8 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
         closesocket(client_socket);
         removeFromHostRunning(hostname);
+        st = "Error";
+        AddLogEntry(GetTime(),GetIP(client_socket),hostname,method,version,st);
         return;
     }
 
@@ -389,6 +410,7 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
         if(is_blacklisted(hostname))
         {
             st = "Blocked";
+            AddLogEntry(GetTime(),GetIP(client_socket),hostname,method,version,st);
             break;
         }
         // Forward data from client to target
@@ -409,10 +431,13 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
             send(client_socket, relay_buffer.data(), recv_size, 0);
         }
         st = "Allowed";
+        AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, version, st);
     }
 
     // Close connections
     // logMessage("Disconnect to " + s + "\n");
+    st = "Closed";
+    AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, version, st);
     closesocket(target_socket);
     closesocket(client_socket);
     removeFromHostRunning(hostname);
@@ -422,11 +447,14 @@ void handleHttpsRequest(SOCKET client_socket, const std::string &request)
 // Function to handle HTTP requests
 void handleHttpRequest(SOCKET client_socket, const std::string &request)
 {
+    std::string st = "Pending";
     char method[10] = {0}, url[256] = {0}, protocol[10] = {0};
     if (sscanf(request.c_str(), "%9s %255s %9s", method, url, protocol) != 3)
     {
         std::cerr << "Error parsing HTTP request\n";
+        AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
         send(client_socket, "HTTP/1.1 400 Bad Request\r\n\r\n", 26, 0);
+        st = "Error";
         closesocket(client_socket);
         return;
     }
@@ -438,7 +466,8 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     {
         std::cerr << "Could not find Host header\r\n";
         send(client_socket, "HTTP/1.1 400 Bad Request\r\n\r\n", 26, 0);
-        st = "Pending";
+        st = "Error";
+         AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
         closesocket(client_socket);
         return;
     }
@@ -450,8 +479,11 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
         send(client_socket, response.c_str(), response.length(), 0);
         closesocket(client_socket);
         st = "Blocked";
+        AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
         return;
     }
+    st = "Allowed";
+    AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
     addToHostRunning(hostname);
     struct sockaddr_in target_addr = {0};
     target_addr.sin_family = AF_INET;
@@ -466,6 +498,8 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
         send(client_socket, "HTTP/1.1 502 Bad Gateway\r\n\r\n", 28, 0);
         closesocket(client_socket);
         removeFromHostRunning(hostname);
+        st = "Error";
+        AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
         return;
     }
 
@@ -475,19 +509,27 @@ void handleHttpRequest(SOCKET client_socket, const std::string &request)
     // logMessage("Connecting to "+ hostname + "\n");
     std::array<char, BUFFER_SIZE> buffer;
     int recv_size;
-
+    bool relay_started = false;
     while ((recv_size = recv(target_socket, buffer.data(), buffer.size(), 0)) > 0)
     {
         if(is_blacklisted(hostname))
         {
             st = "Blocked";
+            AddLogEntry(GetTime(), GetIP(client_socket), url, method, protocol, st);
             break;
         }
-        st = "Allowed";
+        if (!relay_started) {
+            st = "Allowed";
+            AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, protocol, st);
+            relay_started = true;
+        }
+        
         send(client_socket, buffer.data(), recv_size, 0);
     }
 
     // logMessage("Disconnect to "+ hostname + "\n");
+    st = "Closed";
+    AddLogEntry(GetTime(), GetIP(client_socket), hostname, method, protocol, st);
     closesocket(target_socket);
     closesocket(client_socket);
     removeFromHostRunning(hostname);
@@ -505,10 +547,11 @@ void handleClient(SOCKET clientSocket)
     inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN);
     std::string s(clientIP);
     std::string method, hostname, port, version;
-
+    std::string st = "Pending";
     
     if (recvSize == SOCKET_ERROR)
     {
+        st = "Error";
         closesocket(clientSocket);
         return;
     }
@@ -516,9 +559,8 @@ void handleClient(SOCKET clientSocket)
     std::string request(buffer);
     std::stringstream buf(request);
     buf >> method >> hostname >> version;
-    
-    // Log the request
-    // logMessage(std::string("Request from client: " + s + "\r\n" + request + "\r\n"));
+        std::string time = GetTime();
+    AddLogEntry(time,clientIP,hostname,method,version, st);
 
     if (request.find("CONNECT") == 0)
     {
@@ -528,8 +570,11 @@ void handleClient(SOCKET clientSocket)
     {
         handleHttpRequest(clientSocket, request);
     }
-    std::string time = GetTime();
-    AddLogEntry(time,clientIP,hostname,method,version, st);
+    else {
+    st = "Error";
+    AddLogEntry(GetTime(), clientIP, hostname, method, version, st);
+    }
+
     if(!Clients.empty()) Clients.erase(clientIP);
     closesocket(clientSocket);
 }
