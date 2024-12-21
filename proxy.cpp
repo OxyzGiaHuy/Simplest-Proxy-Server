@@ -20,8 +20,12 @@
 #include <atomic>
 #include <commctrl.h>
 #include <chrono>
+#include <gdiplus.h>
 
 #pragma comment(lib, "ws2_32.lib")
+
+#pragma comment(lib, "gdiplus.lib")
+using namespace Gdiplus;
 
 #define WM_SOCKET WM_USER + 1
 #define DEFAULT_PORT "8888"
@@ -55,6 +59,28 @@ std::mutex active_hosts_mutex;
 // Biến toàn cục để theo dõi số byte gửi và nhận
 std::atomic<size_t> totalBytesClientProxy(0), totalBytesProxyWeb(0);
 std::atomic<size_t> totalBytesProxyClient(0), totalBytesWebProxy(0);
+
+void InitGDIPlus() {
+    GdiplusStartupInput gdiplusStartupInput;
+    ULONG_PTR gdiplusToken;
+    GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+}
+
+void DrawLogo(HWND hwnd, HDC hdc) {
+    Graphics graphics(hdc);
+    Image image(L"logo.bmp"); // Đường dẫn tới ảnh
+
+    int targetWidth = 250;
+    int targetHeight = 170;
+
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+    int x = (rect.right - targetWidth - 28); 
+    int y = (rect.bottom - targetHeight); 
+
+    graphics.DrawImage(&image, 825, 420, targetWidth, targetHeight);
+}
+
 
 void processBytesSent(std::atomic<size_t> &totalBytesSent, int byteSent)
 {
@@ -353,6 +379,16 @@ void add_to_blacklist(const std::string &url)
     }
 }
 
+// Function to remove a URL from the blacklist
+void removeBlacklistUrl(int index)
+{
+    if (index >= 0 && index < blacklist.size())
+    {
+        std::lock_guard<std::mutex> lock(blacklist_mutex);
+        blacklist.erase(blacklist.begin() + index);
+        SendMessage(hWndList, LB_DELETESTRING, index, 0);
+    }
+}
 // Function to handle CONNECT requests
 void handleHttpsRequest(SOCKET client_socket, const std::string &request)
 {
@@ -629,7 +665,6 @@ void listenForClients()
                 break;
             }
         }
-        // std::cout<< Clients.size() << " " << CurrentClients.size() << "\n";
         if (!exist)
             CurrentClients.push_back(s);
         if (clientSocket == INVALID_SOCKET)
@@ -640,26 +675,12 @@ void listenForClients()
             }
             break;
         }
-        // logMessage("Client connected: "+ s + "\r\n");
-        // // std::cout << "Client connected: " + s + "\n";
         // // Create a new thread to handle the client
         std::thread throughputMonitor(MonitorThroughput);
         std::thread clientThread(handleClient, clientSocket);
         clientThread.detach();
         throughputMonitor.detach();
         ClientBoxMessage();
-    }
-}
-
-// Function to remove a URL from the blacklist
-
-void removeBlacklistUrl(int index)
-{
-    if (index >= 0 && index < blacklist.size())
-    {
-        std::lock_guard<std::mutex> lock(blacklist_mutex);
-        blacklist.erase(blacklist.begin() + index);
-        SendMessage(hWndList, LB_DELETESTRING, index, 0);
     }
 }
 
@@ -672,6 +693,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         // Create controls
         // Log window (hWnd)
+        InitGDIPlus();
+
         CreateWindowA("STATIC", "Proxy Log", WS_VISIBLE | WS_CHILD | DS_CENTER, 10, 10, 804, 20, hWnd, NULL, NULL, NULL);
         // Create ListView for Proxy Logs
         hWndLogListView = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTVIEW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS,
@@ -687,27 +710,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         lvColumn.fmt = LVCFMT_CENTER;
         ListView_InsertColumn(hWndLogListView, 0, &lvColumn);
 
-        lvColumn.pszText = "Client IP";
+        char client[] = "Client IP";
+        lvColumn.pszText = client;
         lvColumn.cx = 100;
         lvColumn.fmt = LVCFMT_CENTER;
         ListView_InsertColumn(hWndLogListView, 1, &lvColumn);
 
-        lvColumn.pszText = "Host";
+        char host[] = "Destination";
+        lvColumn.pszText = host;
         lvColumn.cx = 250;
         lvColumn.fmt = LVCFMT_CENTER;
         ListView_InsertColumn(hWndLogListView, 2, &lvColumn);
 
-        lvColumn.pszText = "Method";
+        char method[] = "Method";
+        lvColumn.pszText = method;
         lvColumn.cx = 100;
         lvColumn.fmt = LVCFMT_CENTER;
         ListView_InsertColumn(hWndLogListView, 3, &lvColumn);
 
-        lvColumn.pszText = "Version";
+        char version[] = "Version";
+        lvColumn.pszText = version;
         lvColumn.cx = 100;
         lvColumn.fmt = LVCFMT_CENTER;
         ListView_InsertColumn(hWndLogListView, 4, &lvColumn);
 
-        lvColumn.pszText = "Status";
+        char status[] = "Status";
+        lvColumn.pszText = status;
         lvColumn.cx = 100;
         lvColumn.fmt = LVCFMT_CENTER;
         ListView_InsertColumn(hWndLogListView, 5, &lvColumn);
@@ -898,6 +926,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 SetWindowTextA(hWndUrl, ""); // Clear the textbox after adding URL
             }
         }
+        break;
+    }
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        DrawLogo(hWnd, hdc);
+        EndPaint(hWnd, &ps);
         break;
     }
     case WM_DESTROY:
