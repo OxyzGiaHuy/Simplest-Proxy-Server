@@ -68,15 +68,17 @@ void InitGDIPlus() {
 
 void DrawLogo(HWND hwnd, HDC hdc) {
     Graphics graphics(hdc);
-    Image image(L"logo.bmp");
+    Image image(L"logo1.png"); // Đường dẫn tới ảnh
 
-    int targetWidth = 250;
+    int targetWidth = 170;
     int targetHeight = 170;
 
     RECT rect;
     GetClientRect(hwnd, &rect);
+    int x = (rect.right - targetWidth - 28); 
+    int y = (rect.bottom - targetHeight); 
 
-    graphics.DrawImage(&image, 825, 420, targetWidth, targetHeight);
+    graphics.DrawImage(&image, 865, 420, targetWidth, targetHeight);
 }
 
 
